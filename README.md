@@ -76,5 +76,5 @@ Forum](http://www.diybookscanner.org/forum).
 # Acknowledgements
 
 The main author of the code is Jonathon Duerig, though I have taken
-inspiration and ideas from Daniel Reetz, Cristoph Nicolai (guitarguy)
+inspiration and ideas from Daniel Reetz, Christoph Nicolai (guitarguy)
 and anonymous2 from the diybookscanner.org forums.
