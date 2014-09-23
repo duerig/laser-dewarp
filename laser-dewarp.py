@@ -1,3 +1,4 @@
+#!/usr/bin/python
 # A dewarping tool that rectifies a document based on analysis of lasers.
 
 import os, sys, math, argparse, numpy, scipy
