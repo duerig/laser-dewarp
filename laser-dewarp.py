@@ -154,8 +154,8 @@ def findExtreme(points, start, end, increment, ima):
 def outputArcDewarp(imagePath, laserImage, spineImage, spines):
   source = Image.open(imagePath)
   curves = extractLasers(laserImage)
-  makeProcessImage(laserImage, curves,
-                   spines).save('tmp/process.png')
+#  makeProcessImage(laserImage, curves,
+#                   spines).save('tmp/process.png')
   unskewed = unskewImage(source, curves, spines, (255, 255, 255))
   unskewedLaser = unskewImage(laserImage, curves, spines, None)
   unskewedSpineImage = unskewImage(spineImage, curves, spines, None)
