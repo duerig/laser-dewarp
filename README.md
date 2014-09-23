@@ -64,7 +64,7 @@ optional arguments:
                         A threshold (0-255) for lasers when calculating warp.
                         High means less reflected laser light will be counted.
   --bilinear            Use bilinear smoothing during dewarping which is
-                        better but slower. Only affects arc-dewarp.
+                        better but slower.
 </pre>
 
 # Discussion
