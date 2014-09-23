@@ -1,4 +1,4 @@
-= Laser Book Scanning
+# Laser Book Scanning
 
 DIY book scanning is about taking cheap consumer cameras and using
 them to quickly and cheaply scan books. A flatbed scanner is
@@ -18,7 +18,7 @@ well-lit page being scanned. The other is a laser shot taken of the
 same page moments before with the lights off and with laser lines
 turned on.
 
-= Requirements
+# Requirements
 
 To build a laser rig, you will need at least two line-focus lasers, a
 camera, good lighting, and suitable hardware to mount all of these
@@ -36,7 +36,7 @@ order to run the laser dewarping script:
 * Numpy/Scipy
 * Pillow
 
-= Usage
+# Usage
 
 <pre>
 usage: laser-dewarp.py [-h] [--image IMAGE_PATH] [--laser LASER_PATH]
@@ -67,13 +67,13 @@ optional arguments:
                         better but slower. Only affects arc-dewarp.
 </pre>
 
-= Discussion
+# Discussion
 
 This is very early days and nothing is certain yet. To discuss ideas
 or ask questions, ask in the R&D section of the [DIY Book Scanner
 Forum](http://www.diybookscanner.org/forum).
 
-= Acknowledgements
+# Acknowledgements
 
 The main author of the code is Jonathon Duerig, though I have taken
 inspiration and ideas from Daniel Reetz, Cristoph Nicolai (guitarguy)

@@ -384,7 +384,7 @@ def parseArgs():
   parser.add_argument('--bilinear', dest='bilinear', default=False,
                       action='store_const', const=True,
                       help='Use bilinear smoothing during dewarping ' +
-                      'which is better but slower. Only affects arc-dewarp.')
+                      'which is better but slower.')
   options = parser.parse_args()
 
 ###############################################################################
