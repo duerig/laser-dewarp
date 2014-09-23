@@ -35,21 +35,6 @@ class Laser:
     for y in xrange(0, laserImage.size[1]):
       laserImage.putpixel((spine, y), spineColor)
 
-#Numpy is a Python numerical library (matrices, etc.), so this just smooths data. This is basically all that I use numpy for.
-
-def numpy_smooth(x, window_len = 11, window = 'hanning'):
-  if window_len < 3:  return x
-  
-  if window == 'flat':
-    w = numpy.ones(window_len, 'd')
-  else:
-    w = eval('numpy.' + window + '(window_len)')
-  
-  return numpy.convolve(w / w.sum(),
-                        numpy.r_[2 * x[0] - x[window_len - 1::-1],
-                                 x, 2 * x[-1] - x[-1:-window_len:-1]],
-                        mode = 'same')[window_len: -window_len + 1]
-
 ###############################################################################
 
 def findLaserImage(path, thresholdVal):
@@ -103,7 +88,7 @@ def extractCurve(points):
       curve.append(lastPoint)
     lastPoint = nextPoint
     lastIndex = nextIndex
-  return curve#numpy_smooth(numpy.array(curve), window_len = 101)
+  return curve
 
 def findNextPoint(start, points, last):
   resultPoint = last
