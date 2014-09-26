@@ -4,8 +4,9 @@
 import os, sys, math, argparse, numpy, scipy
 from PIL import Image, ImageMath, ImageFilter
 from numpy import polynomial as P
-from scipy import stats, integrate
+from scipy import stats, integrate, signal
 
+version = '0.1'
 options = None
 
 class Line:
@@ -47,7 +48,7 @@ def findLaserImage(path, thresholdVal):
   image = Image.open(path)
   (channelR, channelG, channelB) = image.split()
 
-  threshold = ImageMath.eval("convert(a-(b+c)/2, 'L')",
+  threshold = ImageMath.eval("convert(a, 'L')",
                                  a=channelR, b=channelG, c=channelB)
   threshold = Image.eval(threshold, allOrNothing)
   threshold = threshold.filter(ImageFilter.MedianFilter(5))
@@ -107,114 +108,163 @@ def extractLasers(image):
 
 def extractSpines(curves):
   result = []
-  for curve in curves:
-    points = curve.laserPoints
-    result.append(findExtreme(points, 0, len(points), 1, max))
+  start = int(len(curves[0].curve)/3)
+  end = 2*start
+  if options.frame == 'single':
+    if options.side == 'odd' or options.side == 'right':
+      end = start
+      start = 0
+    elif options.side == 'even' or options.side == 'left':
+      start = end
+      end = int(len(curves[0].curve))
+  top = findPeaks(curves[0].curve, start=start, end=end,
+                  offsetX=20, offsetY=-5, compare=isGreater)
+  bottom = findPeaks(curves[1].curve, start=start, end=end,
+                     offsetX=20, offsetY=5, compare=isLess)
+  if len(top) >= 1 and len(bottom) >= 1:
+    result = [top[int(len(top)/2)], bottom[int(len(bottom)/2)]]
+  else:
+    print 'Could not extract spines.'
+    print 'Top: ', top
+    print 'Bottom: ', bottom
   return result
 
-#def extractSpine(points):
-#  leftBulge = findExtreme(points, 0, len(points), 1, max)
+def extractEdges(curves):
+  start = int(len(curves[0].curve)/3)
+  end = 0
+  increment = -1
+  deltaBack = 16
+  deltaForward = 0
+  if options.side == 'odd' or options.side == 'right':
+    start = 2*start
+    end = len(curves[0].curve)
+    increment = 1
+    deltaBack = 0
+    deltaForward = 16
+  topPrime = getDerivative(curves[0].curve, deltaBack, deltaForward)
+  top = findPeaks(topPrime, start=start, end=end,
+                  increment=increment, offsetX=3, offsetY=0, compare=isGreater)
+  bottomPrime = getDerivative(curves[1].curve, deltaBack, deltaForward)
+  bottom = findPeaks(bottomPrime, start=start, end=end,
+                     increment=increment, offsetX=3, offsetY=0, compare=isLess)
+  result = [findEdge(topPrime, top, end),
+            findEdge(bottomPrime, bottom, end)]
+  return result
 
-#  seekLeft = seekOtherBulge(points, leftBulge, -1, -1)
-#  seekRight = seekOtherBulge(points, leftBulge, len(points), 1)
+def findEdge(points, candidates, default):
+  result = default
+  clipped, low, high = stats.sigmaclip(points, low=3.0, high=3.0)
+  for candidate in candidates:
+    if points[candidate] < low or points[candidate] > high:
+      result = candidate
+      break
+  return result
 
-#  rightBulge = seekRight
-#  if len(points[seekLeft]) > len(points[seekRight]):
-#    rightBulge = leftBulge
-#    leftBulge = seekLeft
+def isGreater(a, b):
+  return a >= b
 
-#  notch = findExtreme(points, leftBulge, rightBulge, 1, min)
-#  return notch
+def isLess(a, b):
+  return a <= b
 
-#def seekOtherBulge(points, start, end, increment):
-#  startThick = len(points[start])
-#  done = False
-#  i = start
-#  while i != end and not done:
-#    i += increment
-#    if len(points[i]) < startThick*0.8:
-#      done = True
-#  return findExtreme(points, i, end, increment, max)
+def getDerivative(curve, deltaBack, deltaForward):
+  result = []
+  for i in xrange(0, len(curve)):
+    deltaLeft = max(i - deltaBack, 0)
+    deltaRight = min(i + deltaForward, len(curve) - 1)
+    result.append(float(curve[deltaRight] - curve[deltaLeft])/(deltaBack + deltaForward))
+  return result
+
+def findPeaks(points, start=0, end=0, increment=1,
+              offsetX=1, offsetY=0, compare=isLess):
+  results = []
+  i = start
+  while i != end:
+    left = constrainPoint(i - offsetX, start, end)
+    right = constrainPoint(i + offsetX, start, end)
+    if (isPeak(points, candidate=i, end=left,
+               increment=-1, compare=compare) and
+        isPeak(points, candidate=i, end=right,
+               increment=1, compare=compare) and
+        taller(points[i], test=points[left],
+               offset=offsetY, compare=compare) and
+        taller(points[i], test=points[right],
+               offset=offsetY, compare=compare)):
+      results.append(i)
+    i += increment
+  return results
+
+def constrainPoint(pos, start, end):
+  result = pos
+  if start < end:
+    if pos < start:
+      result = start
+    if pos > end - 1:
+      result = end - 1
+  else:
+    if pos > start:
+      result = start
+    if pos < end + 1:
+      result = end + 1
+  return result
+
+def isPeak(points, candidate=0, end=1, increment=1, compare=isLess):
+  result = True
+  i = candidate
+  while i != end:
+    if not compare(points[candidate], points[i]):
+      result = False
+    i += increment
+  return result
+
+def taller(candidate, test=0, offset=0, compare=isLess):
+  return compare(candidate + offset, test)
 
 # ima is max (for thickest point) or min (for thinnest)
 def findExtreme(points, start, end, increment, ima):
   extremeIndex = start
   if start != end and start >= 0:
-    extreme = len(points[start])
+    extreme = (points[start])
     i = start
     while i != end:
-      if ima(extreme, len(points[i])) != extreme:
-        extreme = ima(extreme, len(points[i]))
+      if ima(extreme, (points[i])) != extreme:
+        extreme = ima(extreme, (points[i]))
         extremeIndex = i
       i += increment
   return extremeIndex
 
 ###############################################################################
 
-def outputArcDewarp(imagePath, laserImage, spineImage, spines):
+def outputArcDewarp(imagePath, laserLines, spines, edges, laserImage):
   source = Image.open(imagePath)
-  curves = extractLasers(laserImage)
-#  makeProcessImage(laserImage, curves,
-#                   spines).save('tmp/process.png')
-  unskewed = unskewImage(source, curves, spines, (255, 255, 255))
-  unskewedLaser = unskewImage(laserImage, curves, spines, None)
-  unskewedSpineImage = unskewImage(spineImage, curves, spines, None)
-  unskewedCurves = extractLasers(unskewedSpineImage)
-  unskewedSpines = extractSpines(unskewedCurves)
-#  makeProcessImage(unskewedLaser, unskewedCurves,
-#                   unskewedSpines).save('tmp/process-unskewed.png')
   if options.side == 'odd' or options.side == 'right':
-    saveArcDewarp(unskewed, unskewedLaser, unskewedSpines, True)
+    image = arcWarp(source, laserLines[0].curve, laserLines[1].curve,
+                    spines[0], edges[0],
+                    spines[1], edges[1], laserImage)
+    image.save(options.output_path)
   elif options.side == 'even' or options.side == 'left':
-    saveArcDewarp(unskewed, unskewedLaser, unskewedSpines, False)
-
-def saveArcDewarp(unskewed, unskewedLaser, spines, isOdd):
-  suffix = '-even'
-  if isOdd:
-    suffix = '-odd'
-  cropped = cropImage(unskewed, spines, isOdd)
-#  cropped.save('tmp/cropped' + suffix + '.png')
-  croppedLaser = cropImage(unskewedLaser, spines, isOdd)
-  curves = extractLasers(croppedLaser);
-#  makeProcessImage(croppedLaser, curves, []).save('tmp/process' + suffix + '.png')
-  image = arcWarp(cropped, curves[0].curve, curves[1].curve)
-  image.save(options.output_path)
-
-def unskewImage(source, curves, spines, color):
-  radians = math.atan2(curves[0].curve[spines[0]] - curves[1].curve[spines[1]],
-                       spines[0] - spines[1])
-  degrees = 90 + radians*180/math.pi
-  if color:
-    layer = source.convert('RGBA').rotate(degrees, Image.BILINEAR)
-    result = Image.new('RGB', (layer.size[0], layer.size[1]), color)
-    result.paste(layer, (0, 0), layer)
-    return result
+    image = arcWarp(source, laserLines[0].curve, laserLines[1].curve,
+                    edges[0], spines[0],
+                    edges[1], spines[1], laserImage)
+    image.save(options.output_path)
   else:
-    return source.rotate(degrees, Image.BILINEAR)
-
-def cropImage(source, spines, isOdd):
-  leftX = max(spines[0], spines[1])
-  if isOdd:
-    leftX = min(spines[0], spines[1])
-  cropped = None
-  if isOdd:
-    cropped = source.crop((leftX, 0, source.size[0], source.size[1]))
-  else:
-    cropped = source.crop((0, 0, leftX, source.size[1]))
-  return cropped
-
+    print 'Error: The page must be either even or odd'
+    
 ###############################################################################
 
 # Based on http://users.iit.demokritos.gr/~bgat/3337a209.pdf
-def arcWarp(source, inAB, inDC):
-  lastX = source.size[0] - 1
-  AB = calculatePoly(inAB)
-  DC = calculatePoly(inDC)
-  ABarc = calculateArc(AB, len(inAB))
-  DCarc = calculateArc(DC, len(inAB))
-  width = max(ABarc[-1], DCarc[-1])
+def arcWarp(source, inAB, inDC, A, B, D, C, laserImage):
+  print A, B, D, C
+  originAngle = math.atan2(inDC[D] - inAB[A], D - A)
+  cosOrigin = math.cos(originAngle)
+  AB = calculatePoly(inAB[A:B])
+  DC = calculatePoly(inDC[D:C])
+  if options.debug:
+    makePolyImage(laserImage, AB, DC, A, B, D, C).save('tmp/poly.png')
+  ABarc = calculateArc(AB, B-A)
+  DCarc = calculateArc(DC, C-D)
+  width = min(ABarc[-1], DCarc[-1])
   height = max(DC(0) - AB(0),
-               DC(lastX) - AB(lastX))
+               DC(C-D) - AB(B-A))
   startY = AB(0)
   finalWidth = int(math.ceil(width))
   dest = Image.new('RGB', [int(math.ceil(width)),
@@ -226,10 +276,10 @@ def arcWarp(source, inAB, inDC):
   bottomX = 0
   for destX in xrange(0, finalWidth):
     Earc = destX / float(width) * ABarc[-1]
-    while topX < lastX and ABarc[topX] < Earc:
+    while topX < B-A and ABarc[topX] < Earc:
       topX += 1
     E = [topX, AB(topX)]
-    while bottomX < lastX and DCarc[bottomX]/DCarc[-1] < Earc/ABarc[-1]:
+    while bottomX < C-D and DCarc[bottomX]/DCarc[-1] < Earc/ABarc[-1]:
       bottomX += 1
     G = [bottomX, DC(bottomX)]
     sourceAngle = math.atan2(G[1] - E[1], G[0] - E[0])
@@ -238,7 +288,7 @@ def arcWarp(source, inAB, inDC):
     distanceEG = distance(E, G) / height
     for destY in xrange(0, source.size[1]):
       sourceDist = (destY - startY) * distanceEG
-      sourceX = E[0] + sourceDist * cosAngle
+      sourceX = A + E[0] + sourceDist * (cosAngle + cosOrigin)
       sourceY = E[1] + sourceDist * sinAngle
       if options.bilinear:
         canvas[destX, destY] = sampleSource(sourceX, sourceY, sourcePixels, source.size)
@@ -254,9 +304,19 @@ def calculatePoly(curve):
   xbins = binned[1][:-1]
   for i in xrange(len(xbins)):
     xbins[i] = xbins[i] + len(curve)/(binCount*2)
-  base = P.polynomial.polyfit(xbins, ybins, 6)
+  base = P.polynomial.polyfit(xbins, ybins, 10)
   basePoly = P.polynomial.Polynomial(base)
   return basePoly
+
+def makePolyImage(source, top, bottom, A, B, D, C):
+  result = Image.new('RGB', source.size)
+  pixels = result.load()
+  result.paste(source, (0, 0, source.size[0], source.size[1]))
+  for i in xrange(A, B):
+    pixels[i, int(top(i - A))] = (255, 0, 0)
+  for i in xrange(D, C):
+    pixels[i, int(bottom(i - D))] = (0, 255, 0)
+  return result
 
 def calculateArc(base, width):
   prime = P.polynomial.polyder(base.coef)
@@ -310,55 +370,18 @@ def sampleSource(x, y, source, size):
 
 ###############################################################################
 
-def outputScanTailor(laserImage, spines):
-  curves = extractLasers(laserImage)
-#  processImage = makeProcessImage(laserImage, laserLines, spines)
-#  processImage.save('tmp/scantailor-process.png')
-
-  if options.odd_file:
-    saveScanTailorParams(curves, spines, options.odd_file, True)
-  if options.even_file:
-    saveScanTailorParams(curves, spines, options.even_file, False)
-
-def saveScanTailorParams(curves, spines, outPath, isOdd):
-  stFile = open(outPath, 'w')
-  stFile.write(scanTailorParams(curves[0], curves[1],
-                                spines[0], spines[1], isOdd))
-  stFile.close()
-def scanTailorParams(top, bottom, topSpine, bottomSpine):
-  spineSkew = topSpine - bottomSpine
-  result = '<distortion-model>\n'
-  result += scanTailorCurve('top-curve', top, topSpine, spineSkew)
-  result += scanTailorCurve('bottom-curve', bottom, bottomSpine, -spineSkew)
-  result += '</distortion-model>\n'
-  return result
-
-def scanTailorCurve(name, laser, spineIndex, spineSkew):
-  last = min(len(laser.curve), len(laser.curve) + spineSkew) - 1
-  result = '  <' + name + '>\n'
-  result += '    <xspline>\n'
-  for x in xrange(spineIndex, last, 50):
-    result += scanTailorPoint(x, laser)
-  if last % 50 != 49:
-    result += scanTailorPoint(last, laser)
-  result += '    </xspline>\n'
-  result += '    <polyline></polyline>\n'
-  result += '  </' + name + '>\n'
-  return result
-
-def scanTailorPoint(x, laser):
-  return '      <point x="' + str(x) + '" y="' + str(laser.curve[x]) + '"/>\n'
-
-###############################################################################
-
-def makeProcessImage(source, curves, spines):
+def makeProcessImage(source, curves, spines, edges):
   result = Image.new('RGB', source.size)
   result.paste(source, (0, 0, source.size[0], source.size[1]))
-  for i in xrange(0, len(curves)):
-    spine = 0
-    if i < len(spines):
-      spine = spines[i]
-    curves[i].debugImage(result, spine, (255, 255, 0), (0, 0, 255))
+  pixels = result.load()
+  for i in xrange(0, source.size[0]):
+    for curve in curves:
+      pixels[i, int(curve[i])] = (255, 0, 0)
+  for i in xrange(0, source.size[1]):
+    for x in spines:
+      pixels[int(x), i] = (0, 255, 255)
+    for x in edges:
+      pixels[int(x), i] = (0, 255, 0)
   return result
 
 ###############################################################################
@@ -367,6 +390,12 @@ def parseArgs():
   global options
   parser = argparse.ArgumentParser(
     description='A program for dewarping images based on laser measurements taken during scanning.')
+  parser.add_argument('--version', dest='version', default=False,
+                      action='store_const', const=True,
+                      help='Get version information')
+  parser.add_argument('--debug', dest='debug', default=False,
+                      action='store_const', const=True,
+                      help='Print extra debugging information and output pictures to ./tmp while processing (make sure this directory exists).')
   parser.add_argument('--image', dest='image_path', default='image.jpg',
                       help='An image of a document to dewarp')
   parser.add_argument('--laser', dest='laser_path', default='laser.jpg',
@@ -375,31 +404,44 @@ def parseArgs():
                       help='Destination path for dewarped image')
   parser.add_argument('--page', dest='side', default='odd',
                       help='Which side of the spine the page to dewarp is at. Can be either "odd" (equivalent to "right") or "even" (equivalent to "left")')
-  parser.add_argument('--spine-threshold', dest='spine_threshold',
-                      type=int, default=30,
-                      help='A threshold (0-255) for lasers when detecting the spine. Low means reflected laser light will be counted.')
+  parser.add_argument('--frame', dest='frame', default='single',
+                      help='The number of pages in the camera shot. Either "single" if the camera is centered on just one page or "double" if the camera is centered on the spine')
   parser.add_argument('--laser-threshold', dest='laser_threshold',
-                      type=int, default=100,
+                      type=int, default=70,
                       help='A threshold (0-255) for lasers when calculating warp. High means less reflected laser light will be counted.')
   parser.add_argument('--bilinear', dest='bilinear', default=False,
                       action='store_const', const=True,
                       help='Use bilinear smoothing during dewarping ' +
                       'which is better but slower.')
   options = parser.parse_args()
+  if options.version:
+    print 'laser-dewarp.py: Version ' + version
+    exit(0)
 
 ###############################################################################
 
 def main():
   parseArgs()
 
-  spineImage = findLaserImage(options.laser_path, options.spine_threshold)
-#  spineImage.save('tmp/spine-laser.png')
-  spineLines = extractLasers(spineImage)
-  spines = extractSpines(spineLines)
-
   laserImage = findLaserImage(options.laser_path, options.laser_threshold)
-#  laserImage.save('tmp/laser.png')
-  outputArcDewarp(options.image_path, laserImage, spineImage, spines)
+  if options.debug:
+    laserImage.save('tmp/laser.png')
+  laserLines = extractLasers(laserImage)
+  spines = extractSpines(laserLines)
+  edges = extractEdges(laserLines)
+
+  if options.debug:
+    makeProcessImage(laserImage, [laserLines[0].curve, laserLines[1].curve],
+                     spines, edges).save('tmp/process.png')
+  
+  first = getDerivative(laserLines[0].curve, 0, 16)
+  second = first
+  for i in xrange(0, len(second)):
+    second[i] = 500 - second[i]*100
+  makeProcessImage(laserImage, [laserLines[0].curve, second],
+                   spines, edges).save('tmp/second.png')
+
+  outputArcDewarp(options.image_path, laserLines, spines, edges, laserImage)
 
 #import cProfile
 #cProfile.run('main()')

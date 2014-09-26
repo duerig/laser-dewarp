@@ -3,13 +3,15 @@
 DIY book scanning is about taking cheap consumer cameras and using
 them to quickly and cheaply scan books. A flatbed scanner is
 destructive and professionals use scanners that start at $10k and go
-up from there.
+up from there. The goal of this project is to get a high quality
+scanner that can be set up with only a couple of hundred dollars in
+equipment.
 
-Thus far, DIY book scanners have either reduced warping by physically
-forcing the pages to be flat by usinga V-shaped platen made of glass
-or plastic. Accomodating this platen complicates the design of the
-scanner greatly, makes scanning small volumes hard, and slows down the
-scanning process.
+Thus far, DIY book scanners have typically reduced warping by
+physically forcing the pages to be flat using a V-shaped platen made
+of glass or plastic. Accomodating this platen complicates the design
+of the scanner greatly, makes scanning small volumes hard, and slows
+down the scanning process.
 
 This project is about removing the need for a platen and using laser
 beams to detect the shape of the page for later dewarping. The
@@ -39,9 +41,9 @@ order to run the laser dewarping script:
 # Usage
 
 <pre>
-usage: laser-dewarp.py [-h] [--image IMAGE_PATH] [--laser LASER_PATH]
-                       [--output OUTPUT_PATH] [--page SIDE]
-                       [--spine-threshold SPINE_THRESHOLD]
+usage: laser-dewarp.py [-h] [--debug] [--image IMAGE_PATH]
+                       [--laser LASER_PATH] [--output OUTPUT_PATH]
+                       [--page SIDE] [--frame FRAME]
                        [--laser-threshold LASER_THRESHOLD] [--bilinear]
 
 A program for dewarping images based on laser measurements taken during
@@ -49,6 +51,10 @@ scanning.
 
 optional arguments:
   -h, --help            show this help message and exit
+  --version             Get version information
+  --debug               Print extra debugging information and output pictures
+                        to ./tmp while processing (make sure this directory
+                        exists).
   --image IMAGE_PATH    An image of a document to dewarp
   --laser LASER_PATH    A picture with lasers on and lights out taken of the
                         same page as the image.
@@ -56,10 +62,9 @@ optional arguments:
   --page SIDE           Which side of the spine the page to dewarp is at. Can
                         be either "odd" (equivalent to "right") or "even"
                         (equivalent to "left")
-  --spine-threshold SPINE_THRESHOLD
-                        A threshold (0-255) for lasers when detecting the
-                        spine. Low means reflected laser light will be
-                        counted.
+  --frame FRAME         The number of pages in the camera shot. Either
+                        "single" if the camera is centered on just one page or
+                        "double" if the camera is centered on the spine
   --laser-threshold LASER_THRESHOLD
                         A threshold (0-255) for lasers when calculating warp.
                         High means less reflected laser light will be counted.
@@ -78,3 +83,14 @@ Forum](http://www.diybookscanner.org/forum).
 The main author of the code is Jonathon Duerig, though I have taken
 inspiration and ideas from Daniel Reetz, Christoph Nicolai (guitarguy)
 and anonymous2 from the diybookscanner.org forums.
+
+# Changelog
+
+Version 0.1:
+
+* Improved spine detection.
+* Added page edge detection
+* Removed the rotate-and-crop preprocessing step. This was interfering
+  with the dewarping.
+* Dewarping now uses the spine and page edge detection to define the
+  sides of the source shape.
