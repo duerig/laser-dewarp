@@ -41,10 +41,11 @@ order to run the laser dewarping script:
 # Usage
 
 <pre>
-usage: laser-dewarp.py [-h] [--debug] [--image IMAGE_PATH]
+usage: laser-dewarp.py [-h] [--version] [--debug] [--image IMAGE_PATH]
                        [--laser LASER_PATH] [--output OUTPUT_PATH]
                        [--page SIDE] [--frame FRAME]
-                       [--laser-threshold LASER_THRESHOLD] [--bilinear]
+                       [--laser-threshold LASER_THRESHOLD]
+                       [--height-factor HEIGHT_FACTOR] [--bilinear]
 
 A program for dewarping images based on laser measurements taken during
 scanning.
@@ -68,6 +69,14 @@ optional arguments:
   --laser-threshold LASER_THRESHOLD
                         A threshold (0-255) for lasers when calculating warp.
                         High means less reflected laser light will be counted.
+  --height-factor HEIGHT_FACTOR
+                        The curve of the lasers will be multiplied by this
+                        factor to estimate height. The closer the lasers are
+                        to the center of the picture, the higher this number
+                        should be. When this number is too low, text will be
+                        foreshortened near the spine and when it is too high,
+                        the text will be elongated. It should normally be
+                        between 1.0 and 5.0.
   --bilinear            Use bilinear smoothing during dewarping which is
                         better but slower.
 </pre>
@@ -85,6 +94,12 @@ inspiration and ideas from Daniel Reetz, Christoph Nicolai (guitarguy)
 and anonymous2 from the diybookscanner.org forums.
 
 # Changelog
+
+Version 0.2:
+
+* Various tweaks to the algorithm to be more faithful to the original paper.
+* Added --height-factor option which can be increased to reduce
+  foreshortening artifacts.
 
 Version 0.1:
 

@@ -6,7 +6,7 @@ from PIL import Image, ImageMath, ImageFilter
 from numpy import polynomial as P
 from scipy import stats, integrate, signal
 
-version = '0.1'
+version = '0.2'
 options = None
 
 class Line:
@@ -131,13 +131,13 @@ def extractSpines(curves):
 
 def extractEdges(curves):
   start = int(len(curves[0].curve)/3)
-  end = 0
+  end = 1
   increment = -1
   deltaBack = 16
   deltaForward = 0
   if options.side == 'odd' or options.side == 'right':
     start = 2*start
-    end = len(curves[0].curve)
+    end = len(curves[0].curve) - 1
     increment = 1
     deltaBack = 0
     deltaForward = 16
@@ -254,32 +254,30 @@ def outputArcDewarp(imagePath, laserLines, spines, edges, laserImage):
 # Based on http://users.iit.demokritos.gr/~bgat/3337a209.pdf
 def arcWarp(source, inAB, inDC, A, B, D, C, laserImage):
   print A, B, D, C
-  originAngle = math.atan2(inDC[D] - inAB[A], D - A)
-  cosOrigin = math.cos(originAngle)
-  AB = calculatePoly(inAB[A:B])
-  DC = calculatePoly(inDC[D:C])
+  AB = calculatePoly(inAB, A, B)
+  DC = calculatePoly(inDC, D, C)
   if options.debug:
     makePolyImage(laserImage, AB, DC, A, B, D, C).save('tmp/poly.png')
-  ABarc = calculateArc(AB, B-A)
-  DCarc = calculateArc(DC, C-D)
-  width = min(ABarc[-1], DCarc[-1])
-  height = max(DC(0) - AB(0),
-               DC(C-D) - AB(B-A))
-  startY = AB(0)
+  ABarc = calculateArc(AB, A, B, source.size[0])
+  DCarc = calculateArc(DC, D, C, source.size[0])
+  width = min(ABarc[B], DCarc[C])
+  height = min(distance([A, AB(A)], [D, DC(D)]),
+               distance([B, AB(B)], [C, DC(C)]))
+  startY = AB(A)
   finalWidth = int(math.ceil(width))
   dest = Image.new('RGB', [int(math.ceil(width)),
                            source.size[1]])
   canvas = dest.load()
   sourcePixels = source.load()
 
-  topX = 0
-  bottomX = 0
-  for destX in xrange(0, finalWidth):
-    Earc = destX / float(width) * ABarc[-1]
-    while topX < B-A and ABarc[topX] < Earc:
+  topX = A
+  bottomX = D
+  for destX in xrange(A, finalWidth + A):
+    Earc = (destX - A) / float(width) * ABarc[B]
+    while topX < B and ABarc[topX] < Earc:
       topX += 1
     E = [topX, AB(topX)]
-    while bottomX < C-D and DCarc[bottomX]/DCarc[-1] < Earc/ABarc[-1]:
+    while bottomX < C and DCarc[bottomX]/DCarc[C] < Earc/ABarc[B]:
       bottomX += 1
     G = [bottomX, DC(bottomX)]
     sourceAngle = math.atan2(G[1] - E[1], G[0] - E[0])
@@ -288,23 +286,23 @@ def arcWarp(source, inAB, inDC, A, B, D, C, laserImage):
     distanceEG = distance(E, G) / height
     for destY in xrange(0, source.size[1]):
       sourceDist = (destY - startY) * distanceEG
-      sourceX = A + E[0] + sourceDist * (cosAngle + cosOrigin)
+      sourceX = E[0] + sourceDist * cosAngle
       sourceY = E[1] + sourceDist * sinAngle
       if options.bilinear:
-        canvas[destX, destY] = sampleSource(sourceX, sourceY, sourcePixels, source.size)
+        canvas[destX - A, destY] = sampleSource(sourceX, sourceY, sourcePixels, source.size)
       else:
-        canvas[destX, destY] = roundSource(sourceX, sourceY, sourcePixels, source.size)
+        canvas[destX - A, destY] = roundSource(sourceX, sourceY, sourcePixels, source.size)
   return dest
 
-def calculatePoly(curve):
-  binCount = len(curve)/50
-  binned = stats.binned_statistic(xrange(0, len(curve)), curve,
+def calculatePoly(curve, left, right):
+  binCount = (right - left)/50
+  binned = stats.binned_statistic(xrange(0, right - left), curve[left:right],
                                   statistic='mean', bins=binCount)
   ybins = binned[0]
   xbins = binned[1][:-1]
   for i in xrange(len(xbins)):
-    xbins[i] = xbins[i] + len(curve)/(binCount*2)
-  base = P.polynomial.polyfit(xbins, ybins, 10)
+    xbins[i] = xbins[i] + (right-left)/(binCount*2) + left
+  base = P.polynomial.polyfit(xbins, ybins, 7)
   basePoly = P.polynomial.Polynomial(base)
   return basePoly
 
@@ -313,23 +311,27 @@ def makePolyImage(source, top, bottom, A, B, D, C):
   pixels = result.load()
   result.paste(source, (0, 0, source.size[0], source.size[1]))
   for i in xrange(A, B):
-    pixels[i, int(top(i - A))] = (255, 0, 0)
+    pixels[i, int(top(i))] = (255, 0, 0)
   for i in xrange(D, C):
-    pixels[i, int(bottom(i - D))] = (0, 255, 0)
+    pixels[i, int(bottom(i))] = (0, 255, 0)
   return result
 
-def calculateArc(base, width):
-  prime = P.polynomial.polyder(base.coef)
+def calculateArc(base, left, right, sourceWidth):
+  adjustedheight = P.polynomial.polymul([options.height_factor], base.coef)
+  prime = P.polynomial.polyder(adjustedheight)
   squared = P.polynomial.polymul(prime, prime)
   poly = P.polynomial.Polynomial(P.polynomial.polyadd([1], squared))
   def intF(x):
     return math.sqrt(poly(x))
 
   integralSum = 0
-  arcCurve = [0]
-  for x in xrange(1, width):
-    piece = integrate.romberg(intF, x-1, x)
-    integralSum += piece
+  arcCurve = []
+  for x in xrange(0, left):
+    arcCurve.append(0)
+  for x in xrange(left, right):
+    integralSum = integrate.romberg(intF, left, x)
+    arcCurve.append(integralSum)
+  for x in xrange(right, sourceWidth):
     arcCurve.append(integralSum)
   return arcCurve
 
@@ -407,8 +409,11 @@ def parseArgs():
   parser.add_argument('--frame', dest='frame', default='single',
                       help='The number of pages in the camera shot. Either "single" if the camera is centered on just one page or "double" if the camera is centered on the spine')
   parser.add_argument('--laser-threshold', dest='laser_threshold',
-                      type=int, default=70,
+                      type=int, default=40,
                       help='A threshold (0-255) for lasers when calculating warp. High means less reflected laser light will be counted.')
+  parser.add_argument('--height-factor', dest='height_factor',
+                      type=float, default=1.0,
+                      help='The curve of the lasers will be multiplied by this factor to estimate height. The closer the lasers are to the center of the picture, the higher this number should be. When this number is too low, text will be foreshortened near the spine and when it is too high, the text will be elongated. It should normally be between 1.0 and 5.0.'),
   parser.add_argument('--bilinear', dest='bilinear', default=False,
                       action='store_const', const=True,
                       help='Use bilinear smoothing during dewarping ' +
