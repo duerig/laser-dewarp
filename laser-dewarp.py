@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # A dewarping tool that rectifies a document based on analysis of lasers.
 
-import os, sys, math, argparse, numpy, scipy
+import os, sys, math, argparse, numpy, scipy, cv2, cv
 from PIL import Image, ImageMath, ImageFilter
 from numpy import polynomial as P
 from scipy import stats, integrate, signal
@@ -235,17 +235,19 @@ def findExtreme(points, start, end, increment, ima):
 ###############################################################################
 
 def outputArcDewarp(imagePath, laserLines, spines, edges, laserImage):
-  source = Image.open(imagePath)
+  source = cv2.imread(imagePath)#Image.open(imagePath)
   if options.side == 'odd' or options.side == 'right':
     image = arcWarp(source, laserLines[0].curve, laserLines[1].curve,
                     spines[0], edges[0],
                     spines[1], edges[1], laserImage)
-    image.save(options.output_path)
+    cv2.imwrite(options.output_path, image)
+#    image.save(options.output_path)
   elif options.side == 'even' or options.side == 'left':
     image = arcWarp(source, laserLines[0].curve, laserLines[1].curve,
                     edges[0], spines[0],
                     edges[1], spines[1], laserImage)
-    image.save(options.output_path)
+    cv2.imwrite(options.output_path, image)
+#    image.save(options.output_path)
   else:
     print 'Error: The page must be either even or odd'
     
@@ -258,17 +260,16 @@ def arcWarp(source, inAB, inDC, A, B, D, C, laserImage):
   DC = calculatePoly(inDC, D, C)
   if options.debug:
     makePolyImage(laserImage, AB, DC, A, B, D, C).save('tmp/poly.png')
-  ABarc = calculateArc(AB, A, B, source.size[0])
-  DCarc = calculateArc(DC, D, C, source.size[0])
-  width = min(ABarc[B], DCarc[C])
+  ABarc = calculateArc(AB, A, B, source.shape[1])
+  DCarc = calculateArc(DC, D, C, source.shape[1])
+  width = max(ABarc[B], DCarc[C])
   height = min(distance([A, AB(A)], [D, DC(D)]),
                distance([B, AB(B)], [C, DC(C)]))
   startY = AB(A)
   finalWidth = int(math.ceil(width))
-  dest = Image.new('RGB', [int(math.ceil(width)),
-                           source.size[1]])
-  canvas = dest.load()
-  sourcePixels = source.load()
+
+  map_x = numpy.asarray(cv.CreateMat(source.shape[0], finalWidth, cv.CV_32FC1)[:,:])
+  map_y = numpy.asarray(cv.CreateMat(source.shape[0], finalWidth, cv.CV_32FC1)[:,:])
 
   topX = A
   bottomX = D
@@ -284,15 +285,11 @@ def arcWarp(source, inAB, inDC, A, B, D, C, laserImage):
     cosAngle = math.cos(sourceAngle)
     sinAngle = math.sin(sourceAngle)
     distanceEG = distance(E, G) / height
-    for destY in xrange(0, source.size[1]):
+    for destY in xrange(0, source.shape[0]):
       sourceDist = (destY - startY) * distanceEG
-      sourceX = E[0] + sourceDist * cosAngle
-      sourceY = E[1] + sourceDist * sinAngle
-      if options.bilinear:
-        canvas[destX - A, destY] = sampleSource(sourceX, sourceY, sourcePixels, source.size)
-      else:
-        canvas[destX - A, destY] = roundSource(sourceX, sourceY, sourcePixels, source.size)
-  return dest
+      map_x[destY, int(destX - A)] = E[0] + sourceDist * cosAngle
+      map_y[destY, int(destX - A)] = E[1] + sourceDist * sinAngle
+  return cv2.remap(source, map_x, map_y, cv2.INTER_LINEAR)
 
 def calculatePoly(curve, left, right):
   binCount = (right - left)/50
@@ -322,6 +319,7 @@ def calculateArc(base, left, right, sourceWidth):
   squared = P.polynomial.polymul(prime, prime)
   poly = P.polynomial.Polynomial(P.polynomial.polyadd([1], squared))
   def intF(x):
+#    print x, poly(x)
     return math.sqrt(poly(x))
 
   integralSum = 0
@@ -329,7 +327,7 @@ def calculateArc(base, left, right, sourceWidth):
   for x in xrange(0, left):
     arcCurve.append(0)
   for x in xrange(left, right):
-    integralSum = integrate.romberg(intF, left, x)
+    integralSum = integrate.romberg(intF, left, x, divmax=20)
     arcCurve.append(integralSum)
   for x in xrange(right, sourceWidth):
     arcCurve.append(integralSum)
@@ -414,10 +412,6 @@ def parseArgs():
   parser.add_argument('--height-factor', dest='height_factor',
                       type=float, default=1.0,
                       help='The curve of the lasers will be multiplied by this factor to estimate height. The closer the lasers are to the center of the picture, the higher this number should be. When this number is too low, text will be foreshortened near the spine and when it is too high, the text will be elongated. It should normally be between 1.0 and 5.0.'),
-  parser.add_argument('--bilinear', dest='bilinear', default=False,
-                      action='store_const', const=True,
-                      help='Use bilinear smoothing during dewarping ' +
-                      'which is better but slower.')
   options = parser.parse_args()
   if options.version:
     print 'laser-dewarp.py: Version ' + version
