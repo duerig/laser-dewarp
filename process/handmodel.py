@@ -5,6 +5,10 @@
 #
 # Generate a model for detecting hands in book scan images.
 #
+# Based on tutorials and suggestions from:
+# http://docs.opencv.org/trunk/doc/py_tutorials/py_imgproc/py_histograms/py_histogram_backprojection/py_histogram_backprojection.html#histogram-backprojection
+# http://stackoverflow.com/questions/8593091/robust-hand-detection-via-computer-vision
+#
 
 import argparse, cv2, numpy
 
