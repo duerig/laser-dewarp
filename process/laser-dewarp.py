@@ -1,24 +1,13 @@
 #!/usr/bin/python
 # A dewarping tool that rectifies a document based on analysis of lasers.
 
-import os, sys, math, argparse, numpy, scipy, cv2, cv
+import math, argparse, numpy, cv2, cv
 from PIL import Image, ImageMath, ImageFilter
 from numpy import polynomial as P
-from scipy import stats, integrate, signal
+from scipy import stats, integrate
 
 version = '0.2'
 options = None
-
-class Line:
-  def __init__(self, point1, point2):
-    self.slope = (point2[1] - point1[1])/float(point2[0] - point1[0])
-    self.point = point1
-
-  def getY(self, x):
-    return (x - self.point[0])*self.slope + self.point[1]
-
-  def getX(self, y):
-    return (y - self.point[1])/self.slope + self.point[0]
 
 class Laser:
   def __init__(self, laserImage, yBound):
@@ -74,19 +63,7 @@ def extractCurve(points):
   lastPoint, lastIndex = findNextPoint(0, points, 0)
   for x in xrange(0, len(points)):
     nextPoint, nextIndex = findNextPoint(x, points, lastPoint)
-    # If there are no remaining data points, just use the last data
-    # point
-    if nextIndex == -1 or nextIndex == lastIndex:
-      curve.append(lastPoint)
-    # Interpolate between the last data point and the next one. In
-    # the degenerate case where nextIndex == x, this just results in
-    # nextPoint.
-    else:
-#      totalWeight = abs(x - lastIndex) + abs(x - nextIndex)
-#      last = abs(x - nextIndex) * lastPoint
-#      next = abs(x - lastIndex) * nextPoint
-#      curve.append((last + next) / float(totalWeight))
-      curve.append(lastPoint)
+    curve.append(lastPoint)
     lastPoint = nextPoint
     lastIndex = nextIndex
   return curve
@@ -235,19 +212,17 @@ def findExtreme(points, start, end, increment, ima):
 ###############################################################################
 
 def outputArcDewarp(imagePath, laserLines, spines, edges, laserImage):
-  source = cv2.imread(imagePath)#Image.open(imagePath)
+  source = cv2.imread(imagePath)
   if options.side == 'odd' or options.side == 'right':
     image = arcWarp(source, laserLines[0].curve, laserLines[1].curve,
                     spines[0], edges[0],
                     spines[1], edges[1], laserImage)
     cv2.imwrite(options.output_path, image)
-#    image.save(options.output_path)
   elif options.side == 'even' or options.side == 'left':
     image = arcWarp(source, laserLines[0].curve, laserLines[1].curve,
                     edges[0], spines[0],
                     edges[1], spines[1], laserImage)
     cv2.imwrite(options.output_path, image)
-#    image.save(options.output_path)
   else:
     print 'Error: The page must be either even or odd'
     
@@ -319,7 +294,6 @@ def calculateArc(base, left, right, sourceWidth):
   squared = P.polynomial.polymul(prime, prime)
   poly = P.polynomial.Polynomial(P.polynomial.polyadd([1], squared))
   def intF(x):
-#    print x, poly(x)
     return math.sqrt(poly(x))
 
   integralSum = 0
@@ -336,37 +310,6 @@ def calculateArc(base, left, right, sourceWidth):
 def distance(a, b):
   return math.sqrt((a[0]-b[0])*(a[0]-b[0]) +
                    (a[1]-b[1])*(a[1]-b[1]))
-
-def roundSource(x, y, source, size):
-  result = (255, 255, 255)
-  intX = int(round(x))
-  intY = int(round(y))
-  if intX >= 0 and intY >= 0 and intX < size[0] and intY < size[1]:
-    result = source[intX, intY]
-  return result
-
-def sampleSource(x, y, source, size):
-  if x > 0 and y > 0 and x < size[0] - 1 and y < size[1] - 1:
-    intX = int(x)
-    intY = int(y)
-    fracX = x - intX
-    fracY = y - intY
-    fracXY = fracX * fracY
-    a = source[intX+1, intY+1]
-    wa = fracXY
-    b = source[intX+1, intY]
-    wb = fracX - fracXY
-    c = source[intX, intY+1]
-    wc = fracY - fracXY
-    d = source[intX, intY]
-    wd = 1 - fracX - fracY + fracXY
-    return (int(a[0]*wa + b[0]*wb + c[0]*wc + d[0]*wd),
-            int(a[1]*wa + b[1]*wb + c[1]*wc + d[1]*wd),
-            int(a[2]*wa + b[2]*wb + c[2]*wc + d[2]*wd))
-  elif x >= 0 and y >= 0 and x < size[0] and y < size[1]:
-    return source[x, y][0]
-  else:
-    return (255, 255, 255)
 
 ###############################################################################
 
