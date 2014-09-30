@@ -1,0 +1,82 @@
+#!/usr/bin/perl
+
+#use autodie qw(system);
+
+$counter = 0;
+
+sub runProgram($)
+{
+  my $command = shift(@_);
+  print STDERR "RUNNING: " . $command . "\n";
+  system($command);
+}
+
+if (scalar(@ARGV) != 2 ||
+    ($ARGV[0] ne 'keyboard' &&
+     $ARGV[0] ne 'voice'))
+{
+    die("Usage: capture <'keyboard'|'voice'> <dirname>");
+}
+
+$method = $ARGV[0];
+$dirname = $ARGV[1];
+
+sub capture()
+{
+    $name = sprintf("%03d", $counter);
+    runProgram("gphoto2 --filename $dirname/$name.jpg ".
+	       "--capture-image-and-download");
+    runProgram("./lights-off");
+    runProgram("./lasers-on");
+    runProgram("gphoto2 --filename $dirname/$name-laser.jpg ".
+	       "--capture-image-and-download");
+    runProgram("./lights-on");
+    runProgram("~/lasers-off");
+    $counter += 1;
+}
+
+print $dirname;
+
+system("mkdir -p $dirname");
+
+# Initialize
+runProgram("gphoto2 --set-config /main/imgsettings/iso=0 ".
+           "--set-config /main/capturesettings/shutterspeed2=26 ".
+           "--set-config /main/imgsettings/whitebalance=3 ".
+           "--set-config /main/capturesettings/f-number=10 ".
+           "--set-config /main/imgsettings/imagesize=0 ".
+           "--set-config /main/capturesettings/imagequality=2 ".
+           "--set-config /main/status/externalflash=1");
+runProgram("~/lasers-off");
+
+if ($method eq 'keyboard')
+{
+    print("q to quit, enter to capture\n");
+    while ($line = <STDIN>)
+    {
+	chomp($line);
+	if ($line eq "q" || $line eq "Q")
+	{
+	    last;
+	}
+	else
+	{
+	    capture();
+	    print("q to quit, enter to capture\n");
+	}
+    }
+}
+else
+{
+    while ($line = <STDIN>)
+    {
+	print $line;
+	if ($line =~ /scan/)
+	{
+	    capture();
+	}
+    }
+}
+
+
+runProgram("./all-off");

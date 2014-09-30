@@ -1,0 +1,4 @@
+#!/bin/sh
+
+gpio mode 12 out
+gpio write 12 1

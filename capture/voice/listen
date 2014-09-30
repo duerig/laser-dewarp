@@ -1,0 +1,4 @@
+#!/bin/sh
+
+pocketsphinx_continuous -adcdev plughw:0,0 -nfft 2048 -samprate 48000 -fwdflat yes -bestpath yes -lm scan.lm -dict scan.dic
+#2> /dev/null

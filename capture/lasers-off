@@ -1,0 +1,6 @@
+#!/bin/sh
+
+gpio mode 13 out
+gpio write 13 0
+gpio mode 14 out
+gpio write 14 0
