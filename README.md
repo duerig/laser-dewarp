@@ -36,7 +36,7 @@ order to run the laser dewarping script:
 
 * Python
 * Numpy/Scipy
-* Pillow
+* OpenCV (python-opencv)
 
 # Usage
 

@@ -37,10 +37,10 @@ def make_background_mask(source, background, hand_mask):
   mask = numpy.zeros((size[0] + 4, size[1] + 4), numpy.uint8)
   big = cv2.copyMakeBorder(source, 1, 1, 1, 1, cv2.BORDER_CONSTANT, (0, 0, 0))
   cv2.floodFill(big, mask, (0, 0), (255, 255, 255), 100, 25)
-  small = big[1:-1, 1:-1]
-  retval, blue = cv2.threshold(small, 254, 255, cv2.THRESH_BINARY)
-  retval, green = cv2.threshold(small, 254, 255, cv2.THRESH_BINARY)
-  retval, red = cv2.threshold(small, 254, 255, cv2.THRESH_BINARY)
+  channels = cv2.split(big[1:-1, 1:-1])
+  retval, blue = cv2.threshold(channels[0], 254, 255, cv2.THRESH_BINARY)
+  retval, green = cv2.threshold(channels[1], 254, 255, cv2.THRESH_BINARY)
+  retval, red = cv2.threshold(channels[2], 254, 255, cv2.THRESH_BINARY)
   result = cv2.bitwise_and(cv2.bitwise_and(blue, green), red)
   cv2.filter2D(result, -1, disk, result)
   return result
