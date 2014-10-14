@@ -24,6 +24,8 @@ $dirname = $ARGV[1];
 sub capture()
 {
     $name = sprintf("%03d", $counter);
+    runProgram("./lasers-off");
+    runProgram("./guide-off");
     runProgram("gphoto2 --filename $dirname/$name.jpg ".
 	       "--capture-image-and-download");
     runProgram("./lights-off");
@@ -31,7 +33,7 @@ sub capture()
     runProgram("gphoto2 --filename $dirname/$name-laser.jpg ".
 	       "--capture-image-and-download");
     runProgram("./lights-on");
-    runProgram("~/lasers-off");
+    runProgram("./guide-on");
     $counter += 1;
 }
 
@@ -45,9 +47,11 @@ runProgram("gphoto2 --set-config /main/imgsettings/iso=0 ".
            "--set-config /main/imgsettings/whitebalance=3 ".
            "--set-config /main/capturesettings/f-number=10 ".
            "--set-config /main/imgsettings/imagesize=0 ".
-           "--set-config /main/capturesettings/imagequality=2 ".
-           "--set-config /main/status/externalflash=1");
-runProgram("~/lasers-off");
+           "--set-config /main/capturesettings/imagequality=2 ");
+#           "--set-config /main/status/externalflash=1");
+runProgram("./lasers-on");
+runProgram("./lights-on");
+runProgram("./guide-on");
 
 if ($method eq 'keyboard')
 {

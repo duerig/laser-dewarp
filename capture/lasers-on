@@ -2,5 +2,5 @@
 
 gpio mode 13 out
 gpio write 13 1
-gpio mode 14 out
-gpio write 14 1
+gpio mode 9 out
+gpio write 9 1
