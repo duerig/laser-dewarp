@@ -7,13 +7,15 @@
 # and create a mask of the book without either background or hands.
 #
 
-import argparse, cv2, numpy, handmodel
+import argparse, cv2, numpy
+
+import handmodel, lasers
 
 version = '0.1'
 
 disk = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
 
-def create(source, background, handImage):
+def create(source, background, handImage, angle=0):
   model = handmodel.create(background, [handImage])
   hand_mask = make_hand_mask(source, model)
   background_mask = make_background_mask(source, background, hand_mask)
@@ -35,40 +37,24 @@ def make_hand_mask(source, histogram):
   result = big[1:-1, 1:-1]
   result = numpy.where(result == 0, 255, result)
   retval, result = cv2.threshold(result, 254, 255, cv2.THRESH_BINARY)
-#  cv2.erode(result, disk, result, (-1, -1), 5)
-#  cv2.dilate(result, disk, result, (-1, -1))
-#  cv2.erode(result, disk, result, (-1, -1))
-#  result = cv2.medianBlur(result, 9)
-#  result = cv2.medianBlur(result, 45)
-#  cv2.imwrite('blurred.png', result)
-#  cv2.dilate(result, disk, result, (-1, -1), 5)
   cv2.imwrite('hand.png', result)
-#  result = cut_hands(result)
-#  cv2.imwrite('masked_hand.png', result)
+  result = cut_hands(result)
+  cv2.imwrite('masked_hand.png', result)
   return cv2.merge((result, result, result))
 
 def cut_hands(mask):
+  result = numpy.copy(mask)
+  result[0:-1,0:-1] = 0
   contours, hierarchy = cv2.findContours(numpy.copy(mask),
                                          cv2.RETR_EXTERNAL,
                                          cv2.CHAIN_APPROX_SIMPLE)
-  for cnt in contours:
-    left = cnt[cnt[:,:,0].argmin()][0][0]
-    right = cnt[cnt[:,:,0].argmax()][0][0]
-    mask[0:-1,left:right] = 255
-    print left, right
-  return mask
-#  largestContour = None
-#  largestArea = 0.0
-#  for contour in contours:
-#    newArea = cv2.contourArea(contour)
-#    if newArea > largestArea:
-#      largestArea = newArea
-#      largestContour = contour
-#  rect = cv2.minAreaRect(largestContour)
-#  print rect
-#  cv2.drawContours(background_mask, (rect,), 0, 128)
-#  return background_mask
-
+  contourList = list(contours)
+  contourList.sort(key = cv2.contourArea)
+  for contour in contourList[-2:]:
+    left = contour[contour[:,:,0].argmin()][0][0]
+    right = contour[contour[:,:,0].argmax()][0][0]
+    result[0:-1,left:right] = 255
+  return result
 
 def make_background_mask(source, background, hand_mask):
   size = source.shape
@@ -77,7 +63,8 @@ def make_background_mask(source, background, hand_mask):
   cv2.imwrite('subtracted.png', source)
   mask = numpy.zeros((size[0] + 4, size[1] + 4), numpy.uint8)
   big = cv2.copyMakeBorder(source, 1, 1, 1, 1, cv2.BORDER_CONSTANT, (0, 0, 0))
-  cv2.floodFill(big, mask, (0, 0), (255, 255, 255), (50,50,50), (5,5,5), cv2.FLOODFILL_FIXED_RANGE)
+  cv2.floodFill(big, mask, (0, 0), (255, 255, 255), (50,50,50), (5,5,5),
+                cv2.FLOODFILL_FIXED_RANGE)
   channels = cv2.split(big[1:-1, 1:-1])
   retval, blue = cv2.threshold(channels[0], 254, 255, cv2.THRESH_BINARY)
   retval, green = cv2.threshold(channels[1], 254, 255, cv2.THRESH_BINARY)
@@ -98,15 +85,20 @@ def main():
   parser.add_argument('--hand', dest='hand_path',
                       default='hand.png',
                       help='An image with two hands in front of the background')
+  parser.add_argument('--callibration', dest='callibration_path',
+                      default='callibration.png',
+                      help='An image of the lasers on the background for callibration')
   parser.add_argument('input_path',
                       help='Path to a document image')
   parser.add_argument('output_path',
                       help='A mask image with the document piece black and the background and any hands or fingers in white')
   options = parser.parse_args()
-  background = cv2.imread(options.background_path)
+  callibration = cv2.imread(options.callibration_path)
+  angle = 180 - lasers.findLaserAngle(callibration)
+  background = lasers.rotate(cv2.imread(options.background_path), angle)
   #  hand = numpy.loadtxt(options.hand_path)
-  hand = cv2.imread(options.hand_path)
-  source = cv2.imread(options.input_path)
+  hand = lasers.rotate(cv2.imread(options.hand_path), angle)
+  source = lasers.rotate(cv2.imread(options.input_path), angle)
   result = create(source, background, hand)
   cv2.imwrite(options.output_path, result)
 

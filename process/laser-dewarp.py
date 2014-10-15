@@ -3,19 +3,21 @@
 
 import math, argparse, numpy, cv2, cv
 from numpy import polynomial as P
-from scipy import stats, integrate
+from scipy import stats, integrate, interpolate
+
+import lasers
 
 version = '0.3'
 debug = False
 
 def dewarp(image, laser, side='odd', frame='single', threshold=40, factor=1.0,
            mask=None):
-  lasermask = findLaserImage(laser, threshold, mask=mask)
+  lasermask = lasers.findLaserImage(laser, threshold, mask=mask)
   if debug:
     cv2.imwrite('tmp/laser.png', lasermask)
-  top, bottom = extractLasers(lasermask,
-                              side == 'odd' or side == 'right',
-                              frame == 'single')
+  top, bottom = lasers.extractLasers(lasermask,
+                                     side == 'odd' or side == 'right',
+                                     frame == 'single')
 
   if debug:
     cv2.imwrite('tmp/process-top.png', top.processImage())
@@ -39,202 +41,6 @@ def dewarp(image, laser, side='odd', frame='single', threshold=40, factor=1.0,
 
 ###############################################################################
 
-def findLaserImage(image, threshold, mask=None):
-  red = cv2.split(image)[2]
-  if mask is not None:
-    cv2.subtract(red, mask, red)
-  retval, mask = cv2.threshold(red, threshold, 255, cv2.THRESH_BINARY)
-  return cv2.medianBlur(mask, 5)
-
-def extractLasers(image, isOdd, isSingle):
-  contours, hierarchy = cv2.findContours(numpy.copy(image),
-                                         cv2.RETR_EXTERNAL,
-                                         cv2.CHAIN_APPROX_SIMPLE)
-  points = numpy.concatenate(contours)
-  middleY = (numpy.amin(points[:,:,1]) + numpy.amax(points[:,:,1]))/2
-  top = extractLaserPoints(image, (0, middleY))
-  bottom = extractLaserPoints(image, (middleY, image.shape[0]))
-  return (Laser(image, top, True, isOdd, isSingle),
-          Laser(image, bottom, False, isOdd, isSingle))
-
-def extractLaserPoints(image, yBound):
-  result = []
-  for x in xrange(image.shape[1]):
-    column = numpy.nonzero(image[yBound[0]:yBound[1], x])[0]
-    result.append(numpy.add(column, yBound[0]))
-  return result
-
-###############################################################################
-
-class Laser:
-  def __init__(self, mask, points, isTop, isOdd, isSingle):
-    self.mask = mask
-    self.isTop = isTop
-    self.isOdd = isOdd
-    self.isSingle = isSingle
-    self.curve = []
-    self.first = 0
-    self.last = 0
-    self.findCurve(points)
-    self.spine = self.findSpine()
-    self.edge = self.findEdge()
-
-  def findCurve(self, points):
-    self.curve, self.first, self.last = extractCurve(points)
-
-  def findSpine(self):
-    width = self.last - self.first
-    start = self.first + int(width/3)
-    end = self.first + int(2*width/3)
-    if self.isSingle:
-      if self.isOdd:
-        end = start
-        start = self.first
-      else:
-        start = end
-        end = int(self.last)
-    peak = None
-    if self.isTop:
-      peak = findPeaks(self.curve, start=start, end=end,
-                       offsetX=20, offsetY=-5, compare=isGreater)
-    else:
-      peak = findPeaks(self.curve, start=start, end=end,
-                       offsetX=20, offsetY=5, compare=isLess)
-    if len(peak) == 0:
-      raise BaseException('Could not find spine')
-    return peak[int(len(peak)/2)]
-
-  def findEdge(self):
-    width = self.last - self.first
-    start = self.first + int(width/3)
-    end = self.first
-    increment = -1
-    deltaBack = 16
-    deltaForward = 0
-    if self.isOdd:
-      start = self.first + int(2*width/3)
-      end = self.last
-      increment = 1
-      deltaBack = 0
-      deltaForward = 16
-    prime = getDerivative(self.curve, deltaBack, deltaForward)
-    peak = None
-    if self.isTop:
-      peak = findPeaks(prime, start=start, end=end,
-                       increment=increment, offsetX=3, offsetY=0,
-                       compare=isGreater)
-    else:
-      peak = findPeaks(prime, start=start, end=end,
-                       increment=increment, offsetX=3, offsetY=0,
-                       compare=isLess)
-    return findFirstEdge(prime, peak, end)
-
-  def getCurve(self):
-    return self.curve
-
-  def getEdges(self):
-    if self.isOdd:
-      return (self.spine, self.edge)
-    else:
-      return (self.edge, self.spine)
-
-  def processImage(self, poly=None):
-    left, right = self.getEdges()
-    image = cv2.merge((self.mask, self.mask, self.mask))
-    for i in xrange(left, right):
-      image[self.curve[i], i] = (0, 0, 255)
-      if poly is not None:
-        image[poly(i), i] = (255, 255, 0)
-    return image
-
-###############################################################################
-
-def extractCurve(points):
-  first = None
-  last = None
-  curve = []
-  previous = 0
-  for x in xrange(0, len(points)):
-    current = previous
-    if len(points[x]) > 0:
-      current = float(points[x][-1] + points[x][0]) / 2
-      if first is None:
-        first = x
-      last = x
-    curve.append(current)
-    previous = current
-  return curve, first, last
-
-def findFirstEdge(points, candidates, default):
-  result = default
-  clipped, low, high = stats.sigmaclip(points, low=3.0, high=3.0)
-  for candidate in candidates:
-    if points[candidate] < low or points[candidate] > high:
-      result = candidate
-      break
-  return result
-
-def isGreater(a, b):
-  return a >= b
-
-def isLess(a, b):
-  return a <= b
-
-def getDerivative(curve, deltaBack, deltaForward):
-  result = []
-  for i in xrange(0, len(curve)):
-    deltaLeft = max(i - deltaBack, 0)
-    deltaRight = min(i + deltaForward, len(curve) - 1)
-    result.append(float(curve[deltaRight] - curve[deltaLeft])/(deltaBack + deltaForward))
-  return result
-
-def findPeaks(points, start=0, end=0, increment=1,
-              offsetX=1, offsetY=0, compare=isLess):
-  results = []
-  i = start
-  while i != end:
-    left = constrainPoint(i - offsetX, start, end)
-    right = constrainPoint(i + offsetX, start, end)
-    if (isPeak(points, candidate=i, end=left,
-               increment=-1, compare=compare) and
-        isPeak(points, candidate=i, end=right,
-               increment=1, compare=compare) and
-        taller(points[i], test=points[left],
-               offset=offsetY, compare=compare) and
-        taller(points[i], test=points[right],
-               offset=offsetY, compare=compare)):
-      results.append(i)
-    i += increment
-  return results
-
-def constrainPoint(pos, start, end):
-  result = pos
-  if start < end:
-    if pos < start:
-      result = start
-    if pos > end - 1:
-      result = end - 1
-  else:
-    if pos > start:
-      result = start
-    if pos < end + 1:
-      result = end + 1
-  return result
-
-def isPeak(points, candidate=0, end=1, increment=1, compare=isLess):
-  result = True
-  i = candidate
-  while i != end:
-    if not compare(points[candidate], points[i]):
-      result = False
-    i += increment
-  return result
-
-def taller(candidate, test=0, offset=0, compare=isLess):
-  return compare(candidate + offset, test)
-
-###############################################################################
-
 # Based on http://users.iit.demokritos.gr/~bgat/3337a209.pdf
 def warpModel(topLaser, bottomLaser, size, heightFactor):
   A, B = topLaser.getEdges()
@@ -243,8 +49,8 @@ def warpModel(topLaser, bottomLaser, size, heightFactor):
   AB = calculatePoly(topLaser.getCurve(), A, B)
   DC = calculatePoly(bottomLaser.getCurve(), D, C)
   if debug:
-    cv2.imwrite('tmp/poly-top.png', topLaser.processImage(poly=AB))
-    cv2.imwrite('tmp/poly-bottom.png', bottomLaser.processImage(poly=DC))
+    cv2.imwrite('tmp/poly-top.png', topLaser.processImage(poly=AB, knots=AB.get_knots()))
+    cv2.imwrite('tmp/poly-bottom.png', bottomLaser.processImage(poly=DC, knots=DC.get_knots()))
   ABarc = calculateArc(AB, A, B, size[0], heightFactor)
   DCarc = calculateArc(DC, D, C, size[0], heightFactor)
   width = max(ABarc[B], DCarc[C])
@@ -287,31 +93,43 @@ def dewarpFromModel(source, model):
   return dest
 
 def calculatePoly(curve, left, right):
-  binCount = (right - left)/50
+  #xbins = []
+  #ybins = []
+  #for x in xrange(left, right, 50):
+    #xbins.append(x)
+    #ybins.append(curve[x])
+  
+  binCount = (right - left)/20
   binned = stats.binned_statistic(xrange(0, right - left), curve[left:right],
                                   statistic='mean', bins=binCount)
   ybins = binned[0]
   xbins = binned[1][:-1]
   for i in xrange(len(xbins)):
-    xbins[i] = xbins[i] + (right-left)/(binCount*2) + left
-  base = P.polynomial.polyfit(xbins, ybins, 7)
-  basePoly = P.polynomial.Polynomial(base)
-  return basePoly
+    xbins[i] = xbins[i] + left + (right-left)/(binCount*2)
+  
+  #base = P.polynomial.polyfit(xbins, ybins, 7)
+  #basePoly = P.polynomial.Polynomial(base)
+  #xbins = range(0, len(curve))
+  #ybins = curve
+  return interpolate.InterpolatedUnivariateSpline(xbins, ybins, k=3, bbox=[0, len(curve)])
+  #return basePoly
 
 def calculateArc(base, left, right, sourceWidth, heightFactor):
-  adjustedheight = P.polynomial.polymul([heightFactor], base.coef)
-  prime = P.polynomial.polyder(adjustedheight)
-  squared = P.polynomial.polymul(prime, prime)
-  poly = P.polynomial.Polynomial(P.polynomial.polyadd([1], squared))
+  #adjustedheight = P.polynomial.polymul([heightFactor], base.coef)
+  #prime = P.polynomial.polyder(adjustedheight)
+  #squared = P.polynomial.polymul(prime, prime)
+  #poly = P.polynomial.Polynomial(P.polynomial.polyadd([1], squared))
+  prime = base.derivative()
   def intF(x):
-    return math.sqrt(poly(x))
+    p = prime(x)*heightFactor
+    return math.sqrt(p*p + 1)
 
   integralSum = 0
   arcCurve = []
-  for x in xrange(0, left):
+  for x in xrange(0, left+1):
     arcCurve.append(0)
-  for x in xrange(left, right):
-    integralSum = integrate.romberg(intF, left, x, divmax=20)
+  for x in xrange(left+1, right):
+    integralSum += integrate.romberg(intF, x-1, x, divmax=20)
     arcCurve.append(integralSum)
   for x in xrange(right, sourceWidth):
     arcCurve.append(integralSum)
@@ -351,14 +169,20 @@ def main():
                       help='The curve of the lasers will be multiplied by this factor to estimate height. The closer the lasers are to the center of the picture, the higher this number should be. When this number is too low, text will be foreshortened near the spine and when it is too high, the text will be elongated. It should normally be between 1.0 and 5.0.'),
   parser.add_argument('--mask', dest='mask_path', default=None,
                       help='A mask of the pages and book. The book contents should be black and any background, hands, or fingers should all be white.')
+  parser.add_argument('--callibration', dest='callibration_path',
+                      default='callibration.png',
+                      help='An image of the lasers on the background for callibration')
   options = parser.parse_args()
 
   debug = options.debug
-  image = cv2.imread(options.image_path)
-  laser = cv2.imread(options.laser_path)
+  callibration = cv2.imread(options.callibration_path)
+  angle = 180 - lasers.findLaserAngle(callibration)
+  image = lasers.rotate(cv2.imread(options.image_path), angle)
+  laser = lasers.rotate(cv2.imread(options.laser_path), angle)
   mask = None
   if options.mask_path is not None:
     mask = cv2.imread(options.mask_path, cv2.CV_LOAD_IMAGE_GRAYSCALE)
+  print 'angle: ', angle
   result = dewarp(image, laser, side=options.side, frame=options.frame,
                   threshold=options.laser_threshold,
                   factor=options.height_factor, mask=mask)
