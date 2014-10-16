@@ -1,6 +1,6 @@
 import os
 from process import lasers
-import cv2
+import cv2, numpy
 
 def init():
   os.system("gphoto2 --set-config /main/imgsettings/iso=0 " +
@@ -29,19 +29,21 @@ def captureLasers():
 #            "--capture-image-and-download --force-overwrite")
 
 init()
-captureGuide()
-captureLasers()
 #captureBackground()
 
-guideImage = cv2.imread('callibrate-guide.jpg')
-cv2.transpose(guideImage, guideImage)
-cv2.flip(guideImage, 0, guideImage)
-guideMask = lasers.findLaserImage(guideImage, threshold=1)
-guidePoints = lasers.extractLaserPoints(guideMask, (0, guideImage.shape[0]))
-guideLaser = lasers.Laser(guideMask, guidePoints, True, True, True)
+while True:
+  captureGuide()
+  guideImage = cv2.imread('callibrate-guide.jpg')
+  guideImage = cv2.transpose(guideImage)
+  cv2.imwrite('tmp/guide.png', guideImage)
+  cv2.flip(guideImage, 0, guideImage)
+  guideMask = lasers.findLaserImage(guideImage, threshold=1)
+  guidePoints = lasers.extractLaserPoints(guideMask, (0, guideImage.shape[0]))
+  guideLaser = lasers.Laser(guideMask, guidePoints, True, True, True)
+  print guideLaser.curve[0], guideLaser.curve[-1]
+  print 'guide:', - guideLaser.getAngle() - 90
 
-print 'guide:', - guideLaser.getAngle() - 90
-
+captureLasers()
 laserImage = cv2.imread('callibrate-lasers.jpg')
 laserMask = lasers.findLaserImage(laserImage, threshold=1)
 topLaser, bottomLaser = lasers.extractLasers(laserMask, True, True)
@@ -49,5 +51,5 @@ topLaser, bottomLaser = lasers.extractLasers(laserMask, True, True)
 print 'top:', topLaser.getAngle()
 print 'bottom:', bottomLaser.getAngle()
 
-os.system("capture/guide-on")
-os.system("capture/lasers-on")
+#os.system("capture/guide-on")
+#os.system("capture/lasers-on")
