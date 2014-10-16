@@ -29,14 +29,20 @@ def dewarp(image, laser, side='odd', frame='single', threshold=40, factor=1.0,
     dewarpedMask = dewarpFromModel(mask, model)
     cv2.add(result, cv2.merge((dewarpedMask, dewarpedMask, dewarpedMask)), result)
     inverted = numpy.subtract(255, dewarpedMask)
-    topMin = inverted.shape[0]
-    bottomMax = 0
+    topMax = None
+    bottomMin = None
     for x in xrange(0, inverted.shape[1]):
       column = numpy.nonzero(inverted[:, x])[0]
       if len(column) > 0:
-        topMin = min(column[0], topMin)
-        bottomMax = max(column[-1], bottomMax)
-    result = result[topMin:bottomMax, :]
+        if topMax is not None:
+          topMax = max(column[0], topMax)
+        else:
+          topMax = column[0]
+        if bottomMin is not None:
+          bottomMin = min(column[-1], bottomMin)
+        else:
+          bottomMin = column[-1]
+    result = result[topMax:bottomMin, :]
   return result
 
 ###############################################################################
@@ -51,8 +57,8 @@ def warpModel(topLaser, bottomLaser, size, heightFactor):
   if debug:
     cv2.imwrite('tmp/poly-top.png', topLaser.processImage(poly=AB, knots=AB.get_knots()))
     cv2.imwrite('tmp/poly-bottom.png', bottomLaser.processImage(poly=DC, knots=DC.get_knots()))
-  ABarc = calculateArc(AB, A, B, size[0], heightFactor)
-  DCarc = calculateArc(DC, D, C, size[0], heightFactor)
+  ABarc = numpy.asarray(calculateArc(AB, A, B, size[0], heightFactor))
+  DCarc = numpy.asarray(calculateArc(DC, D, C, size[0], heightFactor))
   width = max(ABarc[B], DCarc[C])
   height = min(distance([A, AB(A)], [D, DC(D)]),
                distance([B, AB(B)], [C, DC(C)]))
@@ -64,6 +70,8 @@ def warpModel(topLaser, bottomLaser, size, heightFactor):
 
   topX = A
   bottomX = D
+  destY = numpy.arange(0, size[1])
+
   for destX in xrange(A, finalWidth + A):
     Earc = (destX - A) / float(width) * ABarc[B]
     while topX < B and ABarc[topX] < Earc:
@@ -76,10 +84,10 @@ def warpModel(topLaser, bottomLaser, size, heightFactor):
     cosAngle = math.cos(sourceAngle)
     sinAngle = math.sin(sourceAngle)
     distanceEG = distance(E, G) / height
-    for destY in xrange(0, size[1]):
-      sourceDist = (destY - startY) * distanceEG
-      map_x[destY, int(destX - A)] = E[0] + sourceDist * cosAngle
-      map_y[destY, int(destX - A)] = E[1] + sourceDist * sinAngle
+
+    sourceDist = (destY - startY) * distanceEG
+    map_x[:, int(destX - A)] = E[0] + sourceDist * cosAngle
+    map_y[:, int(destX - A)] = E[1] + sourceDist * sinAngle
   return (map_x, map_y)
 
 def dewarpFromModel(source, model):

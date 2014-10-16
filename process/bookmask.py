@@ -27,9 +27,9 @@ def make_hand_mask(source, histogram):
   probability = cv2.calcBackProject([hsv], [0, 1], histogram,
                                     [0, 180, 0, 256], 1)
   cv2.erode(probability, disk, probability, (-1, -1), 2)
-  cv2.imwrite('ghost.png', probability)
+  #cv2.imwrite('ghost.png', probability)
   retval, result = cv2.threshold(probability, 1, 255, cv2.THRESH_BINARY)
-  cv2.imwrite('threshold.png', result)
+  #cv2.imwrite('threshold.png', result)
   cv2.dilate(result, disk, result, (-1, -1), 6)
   mask = numpy.zeros((source.shape[0] + 4, source.shape[1] + 4), numpy.uint8)
   big = cv2.copyMakeBorder(result, 1, 1, 1, 1, cv2.BORDER_CONSTANT, 0)
@@ -37,9 +37,9 @@ def make_hand_mask(source, histogram):
   result = big[1:-1, 1:-1]
   result = numpy.where(result == 0, 255, result)
   retval, result = cv2.threshold(result, 254, 255, cv2.THRESH_BINARY)
-  cv2.imwrite('hand.png', result)
+  #cv2.imwrite('hand.png', result)
   result = cut_hands(result)
-  cv2.imwrite('masked_hand.png', result)
+  #cv2.imwrite('masked_hand.png', result)
   return cv2.merge((result, result, result))
 
 def cut_hands(mask):
@@ -60,7 +60,7 @@ def make_background_mask(source, background, hand_mask):
   size = source.shape
   cv2.subtract(source, hand_mask, source)
   cv2.subtract(source, background, source)
-  cv2.imwrite('subtracted.png', source)
+  #cv2.imwrite('subtracted.png', source)
   mask = numpy.zeros((size[0] + 4, size[1] + 4), numpy.uint8)
   big = cv2.copyMakeBorder(source, 1, 1, 1, 1, cv2.BORDER_CONSTANT, (0, 0, 0))
   cv2.floodFill(big, mask, (0, 0), (255, 255, 255), (50,50,50), (5,5,5),
