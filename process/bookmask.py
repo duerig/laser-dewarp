@@ -7,7 +7,7 @@
 # and create a mask of the book without either background or hands.
 #
 
-import argparse, cv2, numpy
+import argparse, cv, cv2, numpy
 
 import handmodel, lasers
 
@@ -15,8 +15,7 @@ version = '0.1'
 
 disk = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
 
-def create(source, background, handImage, angle=0):
-  model = handmodel.create(background, [handImage])
+def create(source, background, model, angle=0):
   hand_mask = make_hand_mask(source, model)
   background_mask = make_background_mask(source, background, hand_mask)
   return background_mask
@@ -58,18 +57,25 @@ def cut_hands(mask):
 
 def make_background_mask(source, background, hand_mask):
   size = source.shape
-  cv2.subtract(source, hand_mask, source)
-  cv2.subtract(source, background, source)
+  image = cv2.subtract(source, hand_mask)
+  cv2.subtract(image, background, image)
   #cv2.imwrite('subtracted.png', source)
   mask = numpy.zeros((size[0] + 4, size[1] + 4), numpy.uint8)
-  big = cv2.copyMakeBorder(source, 1, 1, 1, 1, cv2.BORDER_CONSTANT, (0, 0, 0))
-  cv2.floodFill(big, mask, (0, 0), (255, 255, 255), (50,50,50), (5,5,5),
+  big = cv2.copyMakeBorder(image, 1, 1, 1, 1, cv2.BORDER_CONSTANT, (0, 0, 0))
+  cv2.floodFill(big, mask, (0, 0), (0, 0, 0), (50,50,50), (5,5,5),
                 cv2.FLOODFILL_FIXED_RANGE)
   channels = cv2.split(big[1:-1, 1:-1])
-  retval, blue = cv2.threshold(channels[0], 254, 255, cv2.THRESH_BINARY)
-  retval, green = cv2.threshold(channels[1], 254, 255, cv2.THRESH_BINARY)
-  retval, red = cv2.threshold(channels[2], 254, 255, cv2.THRESH_BINARY)
-  result = cv2.bitwise_and(cv2.bitwise_and(blue, green), red)
+  retval, blue = cv2.threshold(channels[0], 1, 255, cv2.THRESH_BINARY)
+  retval, green = cv2.threshold(channels[1], 1, 255, cv2.THRESH_BINARY)
+  retval, red = cv2.threshold(channels[2], 1, 255, cv2.THRESH_BINARY)
+  result = cv2.bitwise_or(cv2.bitwise_or(blue, green), red)
+  contours, hierarchy = cv2.findContours(result,
+                                         cv2.RETR_EXTERNAL,
+                                         cv2.CHAIN_APPROX_SIMPLE)
+  contourList = list(contours)
+  contourList.sort(key = cv2.contourArea)
+  result[:,:] = 255
+  cv2.drawContours(result, [contourList[-1]], 0, 0, thickness=cv.CV_FILLED)
   cv2.filter2D(result, -1, disk, result)
   return result
 
@@ -99,7 +105,8 @@ def main():
   #  hand = numpy.loadtxt(options.hand_path)
   hand = lasers.rotate(cv2.imread(options.hand_path), angle)
   source = lasers.rotate(cv2.imread(options.input_path), angle)
-  result = create(source, background, hand)
+  model = handmodel.create(background, [hand])
+  result = create(source, background, model)
   cv2.imwrite(options.output_path, result)
 
 if __name__ == '__main__':

@@ -216,10 +216,10 @@ def taller(candidate, test=0, offset=0, compare=isLess):
 ###############################################################################
 
 def findLaserAngle(image, threshold=1):
-    lasermask = findLaserImage(image, threshold)
-    cv2.imwrite('tmp/callibrate-laser.png', lasermask)
-    top, bottom = extractLasers(lasermask, True, 'single')
-    return top.getAngle()
+  lasermask = findLaserImage(image, threshold)
+  #cv2.imwrite('tmp/callibrate-laser.png', lasermask)
+  top, bottom = extractLasers(lasermask, True, 'single')
+  return top.getAngle()
 
 def rotate(image, angle):
   matrix = cv2.getRotationMatrix2D((image.shape[1]/2, image.shape[0]/2),

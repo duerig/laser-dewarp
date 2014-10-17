@@ -1,23 +1,20 @@
 #!/usr/bin/python
 # A dewarping tool that rectifies a document based on analysis of lasers.
 
-import math, argparse, numpy, cv2, cv
-from numpy import polynomial as P
+import argparse, cv, cv2, math, numpy, os, re, sys
 from scipy import stats, integrate, interpolate
 
-import lasers
+import bookmask, handmodel, lasers
 
-version = '0.3'
+version = '0.4'
 debug = False
 
-def dewarp(image, laser, side='odd', frame='single', threshold=40, factor=1.0,
+def dewarp(image, laser, threshold=40, factor=1.0,
            mask=None):
   lasermask = lasers.findLaserImage(laser, threshold, mask=mask)
   if debug:
     cv2.imwrite('tmp/laser.png', lasermask)
-  top, bottom = lasers.extractLasers(lasermask,
-                                     side == 'odd' or side == 'right',
-                                     frame == 'single')
+  top, bottom = lasers.extractLasers(lasermask, True, True)
 
   if debug:
     cv2.imwrite('tmp/process-top.png', top.processImage())
@@ -101,12 +98,6 @@ def dewarpFromModel(source, model):
   return dest
 
 def calculatePoly(curve, left, right):
-  #xbins = []
-  #ybins = []
-  #for x in xrange(left, right, 50):
-    #xbins.append(x)
-    #ybins.append(curve[x])
-  
   binCount = (right - left)/20
   binned = stats.binned_statistic(xrange(0, right - left), curve[left:right],
                                   statistic='mean', bins=binCount)
@@ -114,19 +105,9 @@ def calculatePoly(curve, left, right):
   xbins = binned[1][:-1]
   for i in xrange(len(xbins)):
     xbins[i] = xbins[i] + left + (right-left)/(binCount*2)
-  
-  #base = P.polynomial.polyfit(xbins, ybins, 7)
-  #basePoly = P.polynomial.Polynomial(base)
-  #xbins = range(0, len(curve))
-  #ybins = curve
   return interpolate.InterpolatedUnivariateSpline(xbins, ybins, k=3, bbox=[0, len(curve)])
-  #return basePoly
 
 def calculateArc(base, left, right, sourceWidth, heightFactor):
-  #adjustedheight = P.polynomial.polymul([heightFactor], base.coef)
-  #prime = P.polynomial.polyder(adjustedheight)
-  #squared = P.polynomial.polymul(prime, prime)
-  #poly = P.polynomial.Polynomial(P.polynomial.polyadd([1], squared))
   prime = base.derivative()
   def intF(x):
     p = prime(x)*heightFactor
@@ -149,53 +130,91 @@ def distance(a, b):
 
 ###############################################################################
 
+def findImages(root):
+  result = []
+  valid = re.compile('^[0-9]+.jpg$')
+  all = os.listdir(root)
+  for filename in all:
+    path = os.path.join(root, filename)
+    if (os.path.isfile(path) and
+        valid.match(filename)):
+      result.append(os.path.splitext(filename)[0])
+  return result
+
+def checkPath(name, path):
+  if not os.path.exists(path):
+    sys.stderr.write(name + ' not found: ' + path + '\n')
+    exit(1)
+
+
 def main():
   global debug
   parser = argparse.ArgumentParser(
-    description='A program for dewarping images based on laser measurements taken during scanning.')
+    description='A program for dewarping images based on laser measurements taken during scanning. The input directory must have an image of just the background (background.jpg), just your hands over the background (hands.jpg), and the two horizontal lasers on the background (background-laser.jpg) and one or more scanned images.')
   parser.add_argument('--version', action='version',
                       version='%(prog)s Version ' + version,
                       help='Get version information')
   parser.add_argument('--debug', dest='debug', default=False,
                       action='store_const', const=True,
-                      help='Print extra debugging information and output pictures to ./tmp while processing (make sure this directory exists).')
-  parser.add_argument('--image', dest='image_path', default='image.jpg',
-                      help='An image of a document to dewarp')
-  parser.add_argument('--laser', dest='laser_path', default='laser.jpg',
-                      help='A picture with lasers on and lights out taken of the same page as the image.')
-  parser.add_argument('--output', dest='output_path', default='output.png',
-                      help='Destination path for dewarped image')
-  parser.add_argument('--page', dest='side', default='odd',
-                      help='Which side of the spine the page to dewarp is at. Can be either "odd" (equivalent to "right") or "even" (equivalent to "left")')
-  parser.add_argument('--frame', dest='frame', default='single',
-                      help='The number of pages in the camera shot. Either "single" if the camera is centered on just one page or "double" if the camera is centered on the spine')
+                      help='Print extra debugging information and output pictures to ./tmp while processing.')
+  parser.add_argument('--output', dest='output_path', default='out',
+                      help='Path where the resulting dewarped documents are stored. Defaults to ./out')
   parser.add_argument('--laser-threshold', dest='laser_threshold',
                       type=int, default=40,
                       help='A threshold (0-255) for lasers when calculating warp. High means less reflected laser light will be counted.')
-  parser.add_argument('--height-factor', dest='height_factor',
+  parser.add_argument('--stretch-factor', dest='stretch_factor',
                       type=float, default=1.0,
-                      help='The curve of the lasers will be multiplied by this factor to estimate height. The closer the lasers are to the center of the picture, the higher this number should be. When this number is too low, text will be foreshortened near the spine and when it is too high, the text will be elongated. It should normally be between 1.0 and 5.0.'),
-  parser.add_argument('--mask', dest='mask_path', default=None,
-                      help='A mask of the pages and book. The book contents should be black and any background, hands, or fingers should all be white.')
-  parser.add_argument('--callibration', dest='callibration_path',
-                      default='callibration.png',
-                      help='An image of the lasers on the background for callibration')
+                      help='This parameter determines how much text will be stretched horizontally to remove foreshortening of the words. The stretching is concentrated near the spine of the book. When the lasers are far from the lens or the book is laid flat, it should be smaller. It is normally set between 1.0 and 5.0.')
+  parser.add_argument('input_path',
+                      help='Path where the documents to dewarp are stored. If this is a file, dewarp the single file. If this is a folder, dewarps all documents in the folder. The input directory must contain background.jpg, a hands.jpg, and a background-laser.jpg files and a "*-laser.jpg" file for every document to be dewarped.')
   options = parser.parse_args()
-
   debug = options.debug
-  callibration = cv2.imread(options.callibration_path)
-  angle = 180 - lasers.findLaserAngle(callibration)
-  image = lasers.rotate(cv2.imread(options.image_path), angle)
-  laser = lasers.rotate(cv2.imread(options.laser_path), angle)
-  mask = None
-  if options.mask_path is not None:
-    mask = cv2.imread(options.mask_path, cv2.CV_LOAD_IMAGE_GRAYSCALE)
-  print 'angle: ', angle
-  result = dewarp(image, laser, side=options.side, frame=options.frame,
-                  threshold=options.laser_threshold,
-                  factor=options.height_factor, mask=mask)
-  cv2.imwrite(options.output_path, result)
+  if debug:
+    os.system('mkdir -p tmp')
 
+  checkPath('input_path', options.input_path)
+  checkPath('output_path', options.output_path)
+  if os.path.isdir(options.input_path):
+    basePath = options.input_path
+    imageList = findImages(options.input_path)
+  else:
+    basePath, single_image = os.path.split(options.input_path)
+    single_base, single_ext = os.path.splitext(single_image)
+    if single_ext != '.jpg':
+      sys.stderr.write('Input file must be a .jpg file: ' +
+                       options.input_path + '\n')
+      exit(1)
+    imageList = [single_base]
+
+  backgroundPath = os.path.join(basePath, 'background.jpg')
+  checkPath('background path', backgroundPath)
+  backgroundLaserPath = os.path.join(basePath, 'background-laser.jpg')
+  checkPath('background-laser path', backgroundLaserPath)
+  handPath = os.path.join(basePath, 'hands.jpg')
+  checkPath('hands path', handPath)
+
+  callibration = cv2.imread(backgroundLaserPath)
+  angle = 180 - lasers.findLaserAngle(callibration)
+
+  background = lasers.rotate(cv2.imread(backgroundPath), angle)
+  hand = lasers.rotate(cv2.imread(handPath), angle)
+  model = handmodel.create(background, [hand])
+
+  for filename in imageList:
+    imagePath = os.path.join(basePath, filename + '.jpg')
+    checkPath('image path', imagePath)
+    laserPath = os.path.join(basePath, filename + '-laser.jpg')
+    checkPath('laser path', laserPath)
+    sys.stderr.write('Dewarping ' + imagePath + '\n')
+
+    image = lasers.rotate(cv2.imread(imagePath), angle)
+    laser = lasers.rotate(cv2.imread(laserPath), angle)
+    mask = bookmask.create(image, background, model)
+
+    output = dewarp(image, laser, threshold=options.laser_threshold,
+                    factor=options.stretch_factor, mask=mask)
+    outputPath = os.path.join(options.output_path, filename + '.png')
+    cv2.imwrite(outputPath, output)
 
 #import cProfile
 #cProfile.run('main()')
