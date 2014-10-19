@@ -1,12 +1,20 @@
 import cv2, math, numpy
 from scipy import stats
 
-def findLaserImage(image, threshold, mask=None):
-  red = cv2.split(image)[2]
+def findLaserImage(image, background, threshold, mask=None):
+  diff = cv2.absdiff(image, background)
+  cv2.imwrite('diff.png', diff)
+  channels = cv2.split(diff)
+  red = cv2.addWeighted(channels[0], 1/3.0, channels[1], 1/3.0, 0)
+  red = cv2.addWeighted(red, 1.0, channels[2], 1.0, 0)
+  cv2.imwrite('red.png', red)
   if mask is not None:
     cv2.subtract(red, mask, red)
   retval, mask = cv2.threshold(red, threshold, 255, cv2.THRESH_BINARY)
-  return cv2.medianBlur(mask, 5)
+  result = mask
+  #result = cv2.medianBlur(mask, 7)
+  cv2.imwrite('laser-mask.png', result)
+  return result
 
 def extractLasers(image, isOdd, isSingle):
   contours, hierarchy = cv2.findContours(numpy.copy(image),
