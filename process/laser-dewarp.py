@@ -3,24 +3,47 @@
 
 import argparse, cv, cv2, math, numpy, os, re, sys
 from scipy import stats, integrate, interpolate
-
+from numpy import polynomial
 import bookmask, handmodel, lasers
 
 version = '0.4'
 debug = False
 
+def deskew(image):
+  grey = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+  binary = cv2.adaptiveThreshold(grey, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 31, 15)
+  if debug:
+    cv2.imwrite('tmp/binary.png', binary)
+  lines = cv2.HoughLinesP(binary, 2, math.pi/180, 200, minLineLength=image.shape[1]/2.0, maxLineGap=50)
+  total = 0
+  for line in lines[0]:
+    angle = math.atan2(line[3] - line[1], line[2] - line[0])
+    if angle > -0.1 and angle < 0.1:
+      total += angle
+  angle = total / len(lines[0])
+  rotated = lasers.rotate(image, angle * 180 / math.pi)
+  if debug:
+    cv2.imwrite('tmp/deskewed.png', rotated)
+  narrowX = int(math.ceil(abs(math.sin(angle)) * image.shape[0]))
+  narrowY = int(math.ceil(abs(math.sin(angle)) * image.shape[1]))
+  return rotated[narrowY:-(narrowY + 1), narrowX:-(narrowX + 1)]
+
 def dewarp(image, laser, threshold=40, factor=1.0,
-           mask=None):
-  lasermask = lasers.findLaserImage(laser, threshold, mask=mask)
+           mask=None, skew=0.0, spine=0, isOdd=False):
+  lasermask = lasers.findLaserImage(laser, image, threshold, mask=mask)
   if debug:
     cv2.imwrite('tmp/laser.png', lasermask)
+    cv2.imwrite('tmp/rotated.png', image)
   top, bottom = lasers.extractLasers(lasermask, True, True)
 
   if debug:
-    cv2.imwrite('tmp/process-top.png', top.processImage())
-    cv2.imwrite('tmp/process-bottom.png', bottom.processImage())
+    top.findSpine()
+    bottom.findSpine()
+    cv2.imwrite('tmp/process-top.png', top.processImage(knots=[top.spine]))
+    cv2.imwrite('tmp/process-bottom.png', bottom.processImage(knots=[bottom.spine]))
 
-  model = warpModel(top, bottom, (image.shape[1], image.shape[0]), factor)
+  model = warpModel(top, bottom, (image.shape[1], image.shape[0]),
+                    heightFactor=factor, skew=skew, spine=spine, isOdd=isOdd)
   result = dewarpFromModel(image, model)
   if mask is not None:
     dewarpedMask = dewarpFromModel(mask, model)
@@ -45,23 +68,34 @@ def dewarp(image, laser, threshold=40, factor=1.0,
 ###############################################################################
 
 # Based on http://users.iit.demokritos.gr/~bgat/3337a209.pdf
-def warpModel(topLaser, bottomLaser, size, heightFactor):
+def warpModel(topLaser, bottomLaser, size, heightFactor=1.0, skew=0.0,
+              spine=0, isOdd=False):
   A, B = topLaser.getEdges()
   D, C = bottomLaser.getEdges()
-  #print A, B, D, C
+  if isOdd:
+    A = int(spine)
+    D = int(spine)
+  else:
+    B = int(spine)
+    C = int(spine)
+  #print 'ABDC', A, B, D, C
   AB = calculatePoly(topLaser.getCurve(), A, B)
   DC = calculatePoly(bottomLaser.getCurve(), D, C)
   if debug:
-    cv2.imwrite('tmp/poly-top.png', topLaser.processImage(poly=AB, knots=AB.get_knots()))
-    cv2.imwrite('tmp/poly-bottom.png', bottomLaser.processImage(poly=DC, knots=DC.get_knots()))
-  ABarc = numpy.asarray(calculateArc(AB, A, B, size[0], heightFactor))
-  DCarc = numpy.asarray(calculateArc(DC, D, C, size[0], heightFactor))
+    cv2.imwrite('tmp/poly-top.png', topLaser.processImage(poly=AB, bound=(A, B)))
+    cv2.imwrite('tmp/poly-bottom.png', bottomLaser.processImage(poly=DC, bound=(D, C)))
+  ABarc = numpy.asarray(calculateArc(AB, A, B, size[0], heightFactor, skew=skew))
+  DCarc = numpy.asarray(calculateArc(DC, D, C, size[0], heightFactor, skew=skew))
   width = max(ABarc[B], DCarc[C])
-  height = min(distance([A, AB(A)], [D, DC(D)]),
-               distance([B, AB(B)], [C, DC(C)]))
+  height = distance([spine, AB(spine)],
+                    [spine, DC(spine)])
   startY = AB(A)
-  finalWidth = int(math.ceil(width))
 
+  totalOffset = 0
+  skewRad = skew*math.pi/180
+  offsetUnit = math.tan(skewRad)
+  finalWidth = int(math.ceil(width))
+  
   map_x = numpy.asarray(cv.CreateMat(size[1], finalWidth, cv.CV_32FC1)[:,:])
   map_y = numpy.asarray(cv.CreateMat(size[1], finalWidth, cv.CV_32FC1)[:,:])
 
@@ -70,9 +104,10 @@ def warpModel(topLaser, bottomLaser, size, heightFactor):
   destY = numpy.arange(0, size[1])
 
   for destX in xrange(A, finalWidth + A):
-    Earc = (destX - A) / float(width) * ABarc[B]
+    Earc = (destX - A) / float(finalWidth) * ABarc[B]
     while topX < B and ABarc[topX] < Earc:
       topX += 1
+      totalOffset += offsetUnit
     E = [topX, AB(topX)]
     while bottomX < C and DCarc[bottomX]/DCarc[C] < Earc/ABarc[B]:
       bottomX += 1
@@ -83,8 +118,9 @@ def warpModel(topLaser, bottomLaser, size, heightFactor):
     distanceEG = distance(E, G) / height
 
     sourceDist = (destY - startY) * distanceEG
-    map_x[:, int(destX - A)] = E[0] + sourceDist * cosAngle
-    map_y[:, int(destX - A)] = E[1] + sourceDist * sinAngle
+    sourceX = E[0] + sourceDist * cosAngle
+    map_x[:, int(destX - A)] = sourceX
+    map_y[:, int(destX - A)] = E[1] + sourceDist * sinAngle + offsetUnit*(sourceX-spine)
   return (map_x, map_y)
 
 def dewarpFromModel(source, model):
@@ -105,12 +141,16 @@ def calculatePoly(curve, left, right):
   xbins = binned[1][:-1]
   for i in xrange(len(xbins)):
     xbins[i] = xbins[i] + left + (right-left)/(binCount*2)
-  return interpolate.InterpolatedUnivariateSpline(xbins, ybins, k=3, bbox=[0, len(curve)])
+  #return interpolate.InterpolatedUnivariateSpline(xbins, ybins, k=3, bbox=[0, len(curve)])
+  return polynomial.Polynomial.fit(xbins, ybins, 7)
 
-def calculateArc(base, left, right, sourceWidth, heightFactor):
-  prime = base.derivative()
+def calculateArc(base, left, right, sourceWidth, heightFactor, skew=0):
+  skewRad = skew * math.pi / 180.0
+  slopeAdjust = math.sin(skewRad) / math.cos(skewRad)
+  #prime = base.derivative()
+  prime = base.deriv()
   def intF(x):
-    p = prime(x)*heightFactor
+    p = (prime(x) + slopeAdjust)*heightFactor
     return math.sqrt(p*p + 1)
 
   integralSum = 0
@@ -129,6 +169,35 @@ def distance(a, b):
                    (a[1]-b[1])*(a[1]-b[1]))
 
 ###############################################################################
+
+def findSkew(laser, image, threshold=10):
+  lasermask = lasers.findLaserImage(laser, image, threshold)
+  #top, bottom = lasers.extractLasers(lasermask, True, True)
+  #top.findSpine()
+  #bottom.findSpine()
+  #angle = math.atan2(top.curve[top.spine] - bottom.curve[bottom.spine],
+  #                   top.spine - bottom.spine)*180/math.pi
+  #return angle + 90
+  top, bottom = lasers.extractSpines(lasermask)
+  angle = math.atan2(top[1] - bottom[1], top[0] - bottom[0])
+  spineTheta = math.atan2(image.shape[0]/2 - top[1],
+                          image.shape[1]/2 - top[0])
+  spineDistance = distance(top, [image.shape[1]/2, image.shape[0]/2])
+  newSpine = math.cos(angle - spineTheta - math.pi/2) * spineDistance + image.shape[1]/2
+  if debug:
+    debugImage = cv2.merge((lasermask, lasermask, lasermask))
+    for val in [top, bottom]:
+      for y in xrange(debugImage.shape[0]):
+        if val[0] < debugImage.shape[1]:
+          debugImage[y, val[0]] = (0, 255, 0)
+      for x in xrange(debugImage.shape[1]):
+        if val[1] < debugImage.shape[0]:
+          debugImage[val[1], x] = (0, 255, 0)
+    for y in xrange(debugImage.shape[0]):
+      debugImage[y, newSpine] = (255, 0, 255)
+    cv2.imwrite('tmp/spine.png', debugImage)
+  return (angle*180/math.pi + 90, newSpine)
+
 
 def findImages(root):
   result = []
@@ -159,8 +228,24 @@ def main():
                       help='Print extra debugging information and output pictures to ./tmp while processing.')
   parser.add_argument('--output', dest='output_path', default='out',
                       help='Path where the resulting dewarped documents are stored. Defaults to ./out')
+  parser.add_argument('--upside-down', dest='upside_down', default=False,
+                      action='store_const', const=True,
+                      help='The source image is upside down, rotate 180 degrees before processing')
+  parser.add_argument('--contrast', dest='contrast', type=float, default=1.0,
+                      help='Adjust final image contrast  (>=1.0)')
+  parser.add_argument('--brightness', dest='brightness', type=float, default=0.0,
+                      help='Adjust final image brightness  (<=0.0)')
+  parser.add_argument('--greyscale', dest='greyscale', default=False,
+                      action='store_const', const=True,
+                      help='Output the resulting image in greyscale')
+  parser.add_argument('--grayscale', dest='grayscale', default=False,
+                      action='store_const', const=True,
+                      help='Output the resulting image in grayscale')
+  parser.add_argument('--deskew', dest='deskew', default=False,
+                      action='store_const', const=True,
+                      help='Run a final content-based deskewing step before outputting. This analyzes the text itself.')
   parser.add_argument('--laser-threshold', dest='laser_threshold',
-                      type=int, default=40,
+                      type=int, default=10,
                       help='A threshold (0-255) for lasers when calculating warp. High means less reflected laser light will be counted.')
   parser.add_argument('--stretch-factor', dest='stretch_factor',
                       type=float, default=1.0,
@@ -173,7 +258,7 @@ def main():
     os.system('mkdir -p tmp')
 
   checkPath('input_path', options.input_path)
-  checkPath('output_path', options.output_path)
+  os.system('mkdir -p ' + options.output_path)
   if os.path.isdir(options.input_path):
     basePath = options.input_path
     imageList = findImages(options.input_path)
@@ -194,9 +279,12 @@ def main():
   checkPath('hands path', handPath)
 
   callibration = cv2.imread(backgroundLaserPath)
-  angle = 180 - lasers.findLaserAngle(callibration)
+  background = cv2.imread(backgroundPath)
+  angle = -lasers.findLaserAngle(callibration, background)
+  if options.upside_down:
+    angle += 180
 
-  background = lasers.rotate(cv2.imread(backgroundPath), angle)
+  background = lasers.rotate(background, angle)
   hand = lasers.rotate(cv2.imread(handPath), angle)
   model = handmodel.create(background, [hand])
 
@@ -207,15 +295,35 @@ def main():
     checkPath('laser path', laserPath)
     sys.stderr.write('Dewarping ' + imagePath + '\n')
 
-    image = lasers.rotate(cv2.imread(imagePath), angle)
-    laser = lasers.rotate(cv2.imread(laserPath), angle)
+    image = cv2.imread(imagePath)
+    laser = cv2.imread(laserPath)
+    skew, spine = findSkew(lasers.rotate(laser, angle),
+                           lasers.rotate(image, angle),
+                           threshold=options.laser_threshold)
+    #print angle, skew, spine
+
+    image = lasers.rotate(image, angle + skew)
+    laser = lasers.rotate(laser, angle + skew)
     mask = bookmask.create(image, background, model)
 
-    output = dewarp(image, laser, threshold=options.laser_threshold,
-                    factor=options.stretch_factor, mask=mask)
-    outputPath = os.path.join(options.output_path, filename + '.png')
-    cv2.imwrite(outputPath, output)
-
+    for isOdd in [False, True]:
+      output = dewarp(image, laser, threshold=options.laser_threshold,
+                      factor=options.stretch_factor, mask=mask,
+                      skew=skew, spine=spine, isOdd=isOdd)
+      if options.deskew:
+        output = deskew(output)
+      contrast = (options.contrast, options.contrast, options.contrast, 1.0)
+      brightness = (options.brightness, options.brightness,
+                    options.brightness, 0.0)
+      output = cv2.multiply(cv2.add(output, brightness), contrast)
+      if options.greyscale or options.grayscale:
+        output = cv2.cvtColor(output, cv2.COLOR_BGR2GRAY)
+      suffix = 'L'
+      if isOdd:
+        suffix = 'R'
+      outputPath = os.path.join(options.output_path, filename + suffix + '.tif')
+      cv2.imwrite(outputPath, output)
+  
 #import cProfile
 #cProfile.run('main()')
 if __name__ == '__main__':

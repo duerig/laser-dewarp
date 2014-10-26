@@ -2,19 +2,41 @@ import cv2, math, numpy
 from scipy import stats
 
 def findLaserImage(image, background, threshold, mask=None):
-  diff = cv2.absdiff(image, background)
-  cv2.imwrite('diff.png', diff)
+  diff = cv2.subtract(image, background)
+  #cv2.imwrite('diff.png', diff)
   channels = cv2.split(diff)
   red = cv2.addWeighted(channels[0], 1/3.0, channels[1], 1/3.0, 0)
   red = cv2.addWeighted(red, 1.0, channels[2], 1.0, 0)
-  cv2.imwrite('red.png', red)
+  #cv2.imwrite('red.png', red)
   if mask is not None:
     cv2.subtract(red, mask, red)
   retval, mask = cv2.threshold(red, threshold, 255, cv2.THRESH_BINARY)
   result = mask
-  #result = cv2.medianBlur(mask, 7)
-  cv2.imwrite('laser-mask.png', result)
+  result = cv2.medianBlur(mask, 7)
+  #cv2.imwrite('laser-mask.png', result)
   return result
+
+def extractSpines(image):
+  start = image.shape[1]/3
+  end = 2*start
+  image = image[:,start:end]
+  contours, hierarchy = cv2.findContours(numpy.copy(image),
+                                         cv2.RETR_EXTERNAL,
+                                         cv2.CHAIN_APPROX_SIMPLE)
+  points = numpy.concatenate(contours)
+  middleY = (numpy.amin(points[:,:,1]) + numpy.amax(points[:,:,1]))/2
+  top = extreme(image[0:middleY,:], numpy.argmax)
+  bottom = extreme(image[middleY:image.shape[0],:], numpy.argmin)
+  return ([top[0] + start, top[1]],
+          [bottom[0] + start, bottom[1] + middleY])
+
+def extreme(image, fun):
+  contours, hierarchy = cv2.findContours(numpy.copy(image),
+                                         cv2.RETR_EXTERNAL,
+                                         cv2.CHAIN_APPROX_SIMPLE)
+  points = numpy.concatenate(contours)
+  index = fun(points[:,:,1])
+  return tuple(points[index][0])
 
 def extractLasers(image, isOdd, isSingle):
   contours, hierarchy = cv2.findContours(numpy.copy(image),
@@ -58,25 +80,29 @@ class Laser:
     width = self.last - self.first
     start = self.first + int(width/3)
     end = self.first + int(2*width/3)
-    if self.isSingle:
-      if self.isOdd:
-        end = start
-        start = self.first
-      else:
-        start = end
-        end = int(self.last)
-    peak = None
     if self.isTop:
-      peak = findPeaks(self.curve, start=start, end=end,
-                       offsetX=20, offsetY=-5, compare=isGreater)
+      self.spine = numpy.argmax(numpy.asarray(self.curve[start:end])) + start
     else:
-      peak = findPeaks(self.curve, start=start, end=end,
-                       offsetX=20, offsetY=5, compare=isLess)
-    if len(peak) == 0:
-      print 'Could not find spine'
-      return (self.last + self.first) / 2
-    else:
-      return peak[int(len(peak)/2)]
+      self.spine = numpy.argmin(numpy.asarray(self.curve[start:end])) + start
+    #if self.isSingle:
+    #  if self.isOdd:
+    #    end = start
+    #    start = self.first
+    #  else:
+    #    start = end
+    #    end = int(self.last)
+    #peak = None
+    #if self.isTop:
+    #  peak = findPeaks(self.curve, start=start, end=end,
+    #                   offsetX=20, offsetY=-5, compare=isGreater)
+    #else:
+    #  peak = findPeaks(self.curve, start=start, end=end,
+    #                   offsetX=20, offsetY=5, compare=isLess)
+    #if len(peak) == 0:
+    #  print 'Could not find spine'
+    #  return (self.last + self.first) / 2
+    #else:
+    #  return peak[int(len(peak)/2)]
 
   def findEdge(self):
     width = self.last - self.first
@@ -121,8 +147,10 @@ class Laser:
     run = len(self.curve)
     return math.atan2(rise, run)*180/math.pi
 
-  def processImage(self, poly=None, knots=None):
+  def processImage(self, poly=None, knots=None, bound=None):
     left, right = self.getEdges()
+    if bound is not None:
+      left, right = bound
     image = cv2.merge((self.mask, self.mask, self.mask))
     for i in xrange(left, right):
       image[self.curve[i], i] = (0, 0, 255)
@@ -223,8 +251,8 @@ def taller(candidate, test=0, offset=0, compare=isLess):
 
 ###############################################################################
 
-def findLaserAngle(image, threshold=1):
-  lasermask = findLaserImage(image, threshold)
+def findLaserAngle(image, background, threshold=5):
+  lasermask = findLaserImage(image, background, threshold)
   #cv2.imwrite('tmp/callibrate-laser.png', lasermask)
   top, bottom = extractLasers(lasermask, True, 'single')
   return top.getAngle()
