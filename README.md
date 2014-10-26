@@ -71,9 +71,9 @@ optional arguments:
                         stored. Defaults to ./out
   --upside-down         The source image is upside down, rotate 180 degrees
                         before processing
-  --contrast CONTRAST   Adjust final image contrast (>=1.0)
+  --contrast CONTRAST   Adjust final image contrast (between 1.0 and 2.0)
   --brightness BRIGHTNESS
-                        Adjust final image brightness (<=0.0)
+                        Adjust final image brightness (negative means darker)
   --greyscale           Output the resulting image in greyscale
   --grayscale           Output the resulting image in grayscale
   --deskew              Run a final content-based deskewing step before

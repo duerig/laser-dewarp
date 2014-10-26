@@ -232,9 +232,9 @@ def main():
                       action='store_const', const=True,
                       help='The source image is upside down, rotate 180 degrees before processing')
   parser.add_argument('--contrast', dest='contrast', type=float, default=1.0,
-                      help='Adjust final image contrast  (>=1.0)')
+                      help='Adjust final image contrast  (between 1.0 and 2.0)')
   parser.add_argument('--brightness', dest='brightness', type=float, default=0.0,
-                      help='Adjust final image brightness  (<=0.0)')
+                      help='Adjust final image brightness  (negative means darker)')
   parser.add_argument('--greyscale', dest='greyscale', default=False,
                       action='store_const', const=True,
                       help='Output the resulting image in greyscale')
