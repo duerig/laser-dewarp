@@ -41,44 +41,53 @@ order to run the laser dewarping script:
 # Usage
 
 <pre>
-usage: laser-dewarp.py [-h] [--version] [--debug] [--image IMAGE_PATH]
-                       [--laser LASER_PATH] [--output OUTPUT_PATH]
-                       [--page SIDE] [--frame FRAME]
-                       [--laser-threshold LASER_THRESHOLD]
-                       [--height-factor HEIGHT_FACTOR] [--bilinear]
+usage: laser-dewarp.py [-h] [--version] [--debug] [--output OUTPUT_PATH]
+                       [--upside-down] [--contrast CONTRAST]
+                       [--brightness BRIGHTNESS] [--greyscale] [--grayscale]
+                       [--deskew] [--laser-threshold LASER_THRESHOLD]
+                       [--stretch-factor STRETCH_FACTOR]
+                       input_path
 
 A program for dewarping images based on laser measurements taken during
-scanning.
+scanning. The input directory must have an image of just the background
+(background.jpg), just your hands over the background (hands.jpg), and the two
+horizontal lasers on the background (background-laser.jpg) and one or more
+scanned images.
+
+positional arguments:
+  input_path            Path where the documents to dewarp are stored. If this
+                        is a file, dewarp the single file. If this is a
+                        folder, dewarps all documents in the folder. The input
+                        directory must contain background.jpg, a hands.jpg,
+                        and a background-laser.jpg files and a "*-laser.jpg"
+                        file for every document to be dewarped.
 
 optional arguments:
   -h, --help            show this help message and exit
   --version             Get version information
   --debug               Print extra debugging information and output pictures
-                        to ./tmp while processing (make sure this directory
-                        exists).
-  --image IMAGE_PATH    An image of a document to dewarp
-  --laser LASER_PATH    A picture with lasers on and lights out taken of the
-                        same page as the image.
-  --output OUTPUT_PATH  Destination path for dewarped image
-  --page SIDE           Which side of the spine the page to dewarp is at. Can
-                        be either "odd" (equivalent to "right") or "even"
-                        (equivalent to "left")
-  --frame FRAME         The number of pages in the camera shot. Either
-                        "single" if the camera is centered on just one page or
-                        "double" if the camera is centered on the spine
+                        to ./tmp while processing.
+  --output OUTPUT_PATH  Path where the resulting dewarped documents are
+                        stored. Defaults to ./out
+  --upside-down         The source image is upside down, rotate 180 degrees
+                        before processing
+  --contrast CONTRAST   Adjust final image contrast (>=1.0)
+  --brightness BRIGHTNESS
+                        Adjust final image brightness (<=0.0)
+  --greyscale           Output the resulting image in greyscale
+  --grayscale           Output the resulting image in grayscale
+  --deskew              Run a final content-based deskewing step before
+                        outputting. This analyzes the text itself.
   --laser-threshold LASER_THRESHOLD
                         A threshold (0-255) for lasers when calculating warp.
                         High means less reflected laser light will be counted.
-  --height-factor HEIGHT_FACTOR
-                        The curve of the lasers will be multiplied by this
-                        factor to estimate height. The closer the lasers are
-                        to the center of the picture, the higher this number
-                        should be. When this number is too low, text will be
-                        foreshortened near the spine and when it is too high,
-                        the text will be elongated. It should normally be
-                        between 1.0 and 5.0.
-  --bilinear            Use bilinear smoothing during dewarping which is
-                        better but slower.
+  --stretch-factor STRETCH_FACTOR
+                        This parameter determines how much text will be
+                        stretched horizontally to remove foreshortening of the
+                        words. The stretching is concentrated near the spine
+                        of the book. When the lasers are far from the lens or
+                        the book is laid flat, it should be smaller. It is
+                        normally set between 1.0 and 5.0.
 </pre>
 
 # Discussion
@@ -94,6 +103,23 @@ inspiration and ideas from Daniel Reetz, Christoph Nicolai (guitarguy)
 and anonymous2 from the diybookscanner.org forums.
 
 # Changelog
+
+Version 1.0:
+
+* Added automatic deskewing based on spine position
+* Cut each photo into two scans based on the spine
+* Add a final deskew operation based on content after the spine for
+  fine-tuning.
+* Add brightness, contrast, and greyscale conversion options
+* Add support for upside-down cameras, an option which turns everything
+  around 180 degrees
+* Laser dewarp postprocessing is now feature complete.
+
+Version 0.3/0.4:
+
+* Add background and hand detection. Autocrop both hands and the
+  background. Use the hands to determine the left/right edges of the
+  content and page.
 
 Version 0.2:
 

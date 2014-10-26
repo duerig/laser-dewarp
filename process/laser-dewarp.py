@@ -6,7 +6,7 @@ from scipy import stats, integrate, interpolate
 from numpy import polynomial
 import bookmask, handmodel, lasers
 
-version = '0.4'
+version = '1.0'
 debug = False
 
 def deskew(image):
