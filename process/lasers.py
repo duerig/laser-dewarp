@@ -5,9 +5,10 @@ def findLaserImage(image, background, threshold, mask=None):
   diff = cv2.subtract(image, background)
   #cv2.imwrite('diff.png', diff)
   channels = cv2.split(diff)
-  red = cv2.addWeighted(channels[0], 1/3.0, channels[1], 1/3.0, 0)
-  red = cv2.addWeighted(red, 1.0, channels[2], 1.0, 0)
-  #cv2.imwrite('red.png', red)
+  red = channels[2]
+  #red = cv2.addWeighted(channels[0], 1/3.0, channels[1], 1/3.0, 0)
+  #red = cv2.addWeighted(red, 1.0, channels[2], 1.0, 0)
+  cv2.imwrite('red.png', red)
   if mask is not None:
     cv2.subtract(red, mask, red)
   retval, mask = cv2.threshold(red, threshold, 255, cv2.THRESH_BINARY)
